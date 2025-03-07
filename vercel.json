@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "backend/app/main.py",
+      "src": "backend/vercel_handler.py",
       "use": "@vercel/python"
     },
     {
@@ -15,12 +15,16 @@
   ],
   "routes": [
     {
+      "src": "/api/v1/(.*)",
+      "dest": "backend/vercel_handler.py"
+    },
+    {
       "src": "/api/(.*)",
-      "dest": "backend/app/main.py"
+      "dest": "backend/vercel_handler.py"
     },
     {
       "src": "/uploads/(.*)",
-      "dest": "backend/app/main.py"
+      "dest": "backend/vercel_handler.py"
     },
     {
       "src": "/(.*)",
