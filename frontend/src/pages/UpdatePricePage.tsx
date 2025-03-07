@@ -451,32 +451,66 @@ const UpdatePricePage: React.FC = () => {
                   )}
                   
                   {updateCompleted && updatedFile && (
-                    <Box>
-                      <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mb: 2 }}>
+                    <Box sx={{ pt: 2, pb: 4 }}>
+                      <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mb: 3 }}>
                         <Typography variant="body1" fontWeight="bold">
                           Цены успешно обновлены!
                         </Typography>
                         <Typography variant="body2">
                           Обновлено {selectedItems.length} товаров в соответствии с ценами поставщика.
                         </Typography>
+                        <Typography variant="body2" sx={{ mt: 1 }}>
+                          <strong>Файл для скачивания:</strong> {updatedFile.filename}
+                        </Typography>
                       </Alert>
                       
-                      <Button
-                        variant="contained"
-                        color="secondary"
-                        startIcon={<GetAppIcon />}
-                        onClick={handleDownloadFile}
-                        sx={{ mr: 2 }}
+                      <Paper
+                        elevation={3}
+                        sx={{
+                          p: 3,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                          background: 'linear-gradient(145deg, #f9f9f9, #ffffff)',
+                          border: '1px solid #e0e0e0',
+                          borderRadius: 2,
+                          mb: 3
+                        }}
                       >
-                        Скачать обновленный файл
-                      </Button>
-                      
-                      <Button 
-                        variant="outlined" 
-                        onClick={handleGoToHome}
-                      >
-                        На главную
-                      </Button>
+                        <Typography variant="h6" color="primary">
+                          Скачайте обновленный файл
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Все выбранные товары были обновлены в соответствии с ценами поставщика. 
+                          Вы можете скачать обновленный файл для загрузки в вашу систему.
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 2, mt: 1, zIndex: 10, position: 'relative' }}>
+                          <Button
+                            variant="contained"
+                            color="secondary"
+                            size="large"
+                            startIcon={<GetAppIcon />}
+                            onClick={handleDownloadFile}
+                            sx={{ 
+                              px: 3,
+                              py: 1.5,
+                              borderRadius: 2,
+                              boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
+                            }}
+                          >
+                            Скачать обновленный файл
+                          </Button>
+                          
+                          <Button 
+                            variant="outlined"
+                            size="large"
+                            onClick={handleGoToHome}
+                            sx={{ borderRadius: 2 }}
+                          >
+                            На главную
+                          </Button>
+                        </Box>
+                      </Paper>
                     </Box>
                   )}
                 </Box>
@@ -488,12 +522,12 @@ const UpdatePricePage: React.FC = () => {
                     variant="contained"
                     onClick={handleNext}
                     sx={{ mt: 1, mr: 1 }}
-                    disabled={loading || selectedItems.length === 0}
+                    disabled={loading || selectedItems.length === 0 || updateCompleted}
                   >
                     {index === steps.length - 1 ? 'Завершить' : 'Продолжить'}
                   </Button>
                   <Button
-                    disabled={index === 0 || loading}
+                    disabled={index === 0 || loading || updateCompleted}
                     onClick={handleBack}
                     sx={{ mt: 1, mr: 1 }}
                   >
