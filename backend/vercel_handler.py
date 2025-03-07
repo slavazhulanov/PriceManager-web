@@ -4,6 +4,7 @@ import os
 import pandas as pd
 import io
 from supabase import create_client
+import time
 
 # Тестовые данные для демонстрации
 DEMO_DATA = {
@@ -198,6 +199,43 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Content-type', 'application/json')
             self.end_headers()
             self.wfile.write('{"message": "PriceManager API работает"}'.encode())
+        # Обработчик для получения колонок файла
+        elif self.path.startswith('/api/v1/files/columns/') or self.path.startswith('/files/columns/'):
+            try:
+                # Получаем имя файла из URL
+                parts = self.path.split('/')
+                filename = parts[-1]  # Последняя часть URL - имя файла
+                
+                print(f"Получен запрос на получение колонок файла: {filename}")
+                
+                # Для демонстрации возвращаем моковые колонки
+                # В реальном приложении здесь должен быть код для чтения файла и получения колонок
+                
+                # Определяем тип файла по имени
+                is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
+                
+                if is_supplier:
+                    columns = ['Артикул', 'Цена поставщика', 'Наименование товара', 'Категория', 'Бренд']
+                else:
+                    columns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория']
+                
+                # Отправляем успешный ответ
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                self.end_headers()
+                self.wfile.write(json.dumps(columns).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                self.end_headers()
+                error_msg = {"error": f"Ошибка при получении колонок файла: {str(e)}"}
+                self.wfile.write(json.dumps(error_msg).encode())
         elif self.path.startswith('/api/v1'):
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -219,8 +257,91 @@ class handler(BaseHTTPRequestHandler):
             # Получаем данные запроса
             post_data = self.rfile.read(content_length)
             
+            # Обработчик загрузки файлов
+            if self.path == '/api/v1/files/upload' or self.path == '/files/upload':
+                try:
+                    # Проверяем, является ли контент многофайловым
+                    content_type = self.headers.get('Content-Type', '')
+                    if 'multipart/form-data' in content_type:
+                        print("Получен запрос на загрузку файла (multipart/form-data)")
+                        
+                        # Для демонстрации просто возвращаем успешный ответ с моковыми данными
+                        # В реальном приложении здесь должен быть код для обработки multipart/form-data и сохранения файла
+                        
+                        filename = "mock_file.csv"  # В реальном приложении извлекается из запроса
+                        file_type = "store"         # В реальном приложении извлекается из запроса
+                        
+                        # Генерируем уникальное имя для сохраненного файла
+                        stored_filename = f"mock_{int(time.time())}_{filename}"
+                        
+                        # Формируем ответ
+                        file_info = {
+                            "id": f"mock-id-{int(time.time())}",
+                            "original_filename": filename,
+                            "stored_filename": stored_filename,
+                            "file_type": file_type,
+                            "encoding": "utf-8",
+                            "separator": ","
+                        }
+                        
+                        # Отправляем успешный ответ
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                        self.end_headers()
+                        self.wfile.write(json.dumps(file_info).encode())
+                    else:
+                        # Если контент не multipart/form-data, возвращаем ошибку
+                        self.send_response(400)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({"error": "Ожидается multipart/form-data"}).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при загрузке файла: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+            
+            # Обработчик для сохранения маппинга колонок
+            elif self.path == '/api/v1/files/mapping' or self.path == '/files/mapping':
+                try:
+                    # Парсим JSON
+                    data = json.loads(post_data.decode('utf-8'))
+                    
+                    print(f"Получен запрос на сохранение маппинга колонок для файла: {data.get('original_filename', 'неизвестный')}")
+                    
+                    # Для демонстрации просто возвращаем тот же объект
+                    # В реальном приложении здесь должен быть код для сохранения маппинга
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при сохранении маппинга колонок: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+
             # Для сравнения прайс-листов
-            if self.path == '/api/v1/comparison/compare' or self.path == '/comparison/compare':
+            elif self.path == '/api/v1/comparison/compare' or self.path == '/comparison/compare':
                 try:
                     # Парсим JSON
                     data = json.loads(post_data.decode('utf-8'))
@@ -317,6 +438,40 @@ class handler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                     self.end_headers()
                     error_msg = {"error": f"Ошибка при сохранении цен: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+
+            # Обработчик для обновления цен
+            elif self.path == '/api/v1/prices/update' or self.path == '/prices/update':
+                try:
+                    # Парсим JSON
+                    data = json.loads(post_data.decode('utf-8'))
+                    
+                    # Получаем данные из запроса
+                    updates = data.get('updates', [])
+                    store_file = data.get('store_file', {})
+                    
+                    print(f"Получен запрос на обновление цен для файла магазина: {store_file.get('original_filename', 'неизвестный')}")
+                    print(f"Количество обновлений: {len(updates)}")
+                    
+                    # Для демонстрации просто возвращаем те же обновления
+                    # В реальном приложении здесь должна быть логика обновления цен в файле
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(updates).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при обновлении цен: {str(e)}"}
                     self.wfile.write(json.dumps(error_msg).encode())
             else:
                 self.send_response(404)
