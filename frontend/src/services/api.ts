@@ -102,43 +102,22 @@ export const comparisonService = {
 export const priceService = {
   // Загрузка файла
   async uploadFile(file: File, fileType: FileType): Promise<FileInfo> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('file_type', fileType);
-
-    const response = await api.post('/files/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-
-    return response.data;
+    return fileService.uploadFile(file, fileType);
   },
   
   // Получение списка колонок из файла
   async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
-    const params: any = { encoding, separator };
-    // Удаляем undefined параметры
-    Object.keys(params).forEach(key => params[key] === undefined && delete params[key]);
-    
-    const response = await api.get(`/files/columns/${filename}`, { params });
-    return response.data;
+    return fileService.getColumns(filename, encoding, separator);
   },
   
   // Сохранение маппинга колонок
   async saveColumnMapping(fileInfo: FileInfo): Promise<FileInfo> {
-    const response = await api.post('/files/mapping', fileInfo);
-    return response.data;
+    return fileService.saveColumnMapping(fileInfo);
   },
 
   // Сравнение файлов
   async compareFiles(supplierFile: FileInfo, storeFile: FileInfo): Promise<ComparisonResult> {
-    const response = await api.post('/comparison/compare', {
-      supplier_file: supplierFile,
-      store_file: storeFile,
-    });
-
-    return response.data;
+    return comparisonService.compareFiles(supplierFile, storeFile);
   },
 
   // Обновление цен

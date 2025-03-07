@@ -178,11 +178,18 @@ const UpdatePricePage: React.FC = () => {
       
       // Если URL не начинается с http и мы в режиме разработки, добавляем базовый URL API
       if (!downloadUrl.startsWith('http') && process.env.NODE_ENV !== 'production') {
-        const baseApiUrl = 'http://localhost:8000';
+        const baseApiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
         downloadUrl = `${baseApiUrl}${downloadUrl}`;
       }
       
       console.log('Скачивание файла:', updatedFile.filename, 'URL:', downloadUrl);
+      
+      // Для тестирования - если скачивание не работает, предложим альтернативу
+      if (downloadUrl.includes('mock') || updatedFile.filename.includes('mock')) {
+        console.log('Используется тестовое скачивание файла');
+        alert('Это демонстрационный режим. В реальной версии здесь было бы скачивание файла.');
+        return;
+      }
       
       // Создаем ссылку для скачивания
       const link = document.createElement('a');

@@ -12,7 +12,8 @@ import {
   Divider,
   Alert,
   Card,
-  CardContent
+  CardContent,
+  CircularProgress
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -21,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import FileDropzone from '../components/file/FileDropzone';
 import ColumnSelector from '../components/file/ColumnSelector';
 import { FileInfo, FileType, ColumnMapping } from '../types';
+import { fileService } from '../services/api';
 
 // Шаги загрузки файлов
 const steps = [
@@ -50,41 +52,65 @@ const FileUploadPage: React.FC = () => {
   const [storeColumns, setStoreColumns] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  
+  // Загрузка колонок для файлов
+  const loadColumns = async () => {
+    setColumnsLoading(true);
+    setError(null);
+    
+    try {
+      // Загрузка колонок для файла поставщика
+      if (supplierFile && !supplierColumns.length) {
+        try {
+          // В реальном приложении или если включен флаг использования реального API
+          if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
+            const columns = await fileService.getColumns(
+              supplierFile.stored_filename,
+              supplierFile.encoding,
+              supplierFile.separator
+            );
+            setSupplierColumns(columns);
+          } else {
+            // Для демонстрации используем моковые данные
+            // Если файл содержит 'mock' в имени, используем предопределенные колонки
+            const mockColumns = ['Артикул', 'Цена поставщика', 'Наименование товара', 'Категория', 'Бренд'];
+            setSupplierColumns(mockColumns);
+          }
+        } catch (err: any) {
+          console.error('Ошибка загрузки колонок для файла поставщика:', err);
+          setError(`Ошибка загрузки колонок для файла поставщика: ${err.message || err}`);
+        }
+      }
+      
+      // Загрузка колонок для файла магазина
+      if (storeFile && !storeColumns.length) {
+        try {
+          // В реальном приложении или если включен флаг использования реального API
+          if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
+            const columns = await fileService.getColumns(
+              storeFile.stored_filename,
+              storeFile.encoding,
+              storeFile.separator
+            );
+            setStoreColumns(columns);
+          } else {
+            // Для демонстрации используем моковые данные
+            const mockColumns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория'];
+            setStoreColumns(mockColumns);
+          }
+        } catch (err: any) {
+          console.error('Ошибка загрузки колонок для файла магазина:', err);
+          setError(`Ошибка загрузки колонок для файла магазина: ${err.message || err}`);
+        }
+      }
+    } finally {
+      setColumnsLoading(false);
+    }
+  };
   
   // При изменении файлов загружаем их колонки
   useEffect(() => {
-    const loadColumns = async () => {
-      try {
-        // В реальном приложении мы бы здесь делали запрос к API для получения колонок
-        // fileService.getColumns(supplierFile.stored_filename, supplierFile.encoding, supplierFile.separator)
-        
-        // Для примера используем моки
-        if (supplierFile && !supplierColumns.length) {
-          setSuccess('Файл поставщика успешно загружен');
-          setSupplierColumns([
-            'Артикул', 
-            'Наименование товара', 
-            'Цена', 
-            'Количество', 
-            'Категория'
-          ]);
-        }
-        
-        if (storeFile && !storeColumns.length) {
-          setSuccess('Файл магазина успешно загружен');
-          setStoreColumns([
-            'Код товара', 
-            'Товар', 
-            'Стоимость', 
-            'Остаток', 
-            'Раздел'
-          ]);
-        }
-      } catch (err: any) {
-        setError('Ошибка при загрузке колонок: ' + (err.message || 'Неизвестная ошибка'));
-      }
-    };
-    
     loadColumns();
   }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length]);
   
@@ -102,11 +128,22 @@ const FileUploadPage: React.FC = () => {
   const handleSupplierColumnMapping = (mapping: ColumnMapping) => {
     if (supplierFile) {
       const updatedFile = { ...supplierFile, column_mapping: mapping };
+      
+      // Обновляем состояние интерфейса
       setSupplierFile(updatedFile);
       setSuccess('Колонки для файла поставщика настроены');
       
-      // В реальном приложении мы бы здесь сохраняли маппинг на сервере
-      // fileService.saveColumnMapping(updatedFile)
+      // В реальном приложении сохраняем маппинг на сервере
+      if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
+        fileService.saveColumnMapping(updatedFile)
+          .then(() => {
+            console.log('Маппинг колонок для поставщика успешно сохранен на сервере');
+          })
+          .catch(err => {
+            console.error('Ошибка при сохранении маппинга колонок поставщика:', err);
+            // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
+          });
+      }
     }
   };
   
@@ -114,11 +151,22 @@ const FileUploadPage: React.FC = () => {
   const handleStoreColumnMapping = (mapping: ColumnMapping) => {
     if (storeFile) {
       const updatedFile = { ...storeFile, column_mapping: mapping };
+      
+      // Обновляем состояние интерфейса
       setStoreFile(updatedFile);
       setSuccess('Колонки для файла магазина настроены');
       
-      // В реальном приложении мы бы здесь сохраняли маппинг на сервере
-      // fileService.saveColumnMapping(updatedFile)
+      // В реальном приложении сохраняем маппинг на сервере
+      if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
+        fileService.saveColumnMapping(updatedFile)
+          .then(() => {
+            console.log('Маппинг колонок для магазина успешно сохранен на сервере');
+          })
+          .catch(err => {
+            console.error('Ошибка при сохранении маппинга колонок магазина:', err);
+            // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
+          });
+      }
     }
   };
   

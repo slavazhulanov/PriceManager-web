@@ -13,6 +13,7 @@ import {
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { FileType } from '../../types';
+import { fileService } from '../../services/api';
 
 interface FileDropzoneProps {
   fileType: FileType;
@@ -59,23 +60,35 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       setError(null);
       
       // Здесь будет вызов API для загрузки файла
-      // В реальном приложении мы бы использовали fileService.uploadFile(file, fileType)
-      // Но для примера просто имитируем загрузку
-      
-      setTimeout(() => {
-        const fileInfo = {
-          id: 'mock-id',
-          original_filename: file.name,
-          stored_filename: 'mock-stored-filename',
-          file_type: fileType,
-          encoding: 'utf-8',
-          separator: ','
-        };
-        
-        onFileUploaded(fileInfo);
+      try {
+        // Проверяем, используем ли реальный API или моки
+        if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
+          const fileInfo = await fileService.uploadFile(file, fileType);
+          onFileUploaded(fileInfo);
+          setFileUploaded(true);
+        } else {
+          // Для демонстрации просто имитируем загрузку
+          setTimeout(() => {
+            const mockFilename = file.name.toLowerCase().includes('mock') 
+              ? file.name 
+              : 'mock_' + file.name;
+              
+            const fileInfo = {
+              id: 'mock-id-' + Date.now(),
+              original_filename: file.name,
+              stored_filename: mockFilename,
+              file_type: fileType,
+              encoding: 'utf-8',
+              separator: ','
+            };
+            
+            onFileUploaded(fileInfo);
+            setFileUploaded(true);
+          }, 1000);
+        }
+      } finally {
         setLoading(false);
-        setFileUploaded(true);
-      }, 1000);
+      }
       
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке файла.');
