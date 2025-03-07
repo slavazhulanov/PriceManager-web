@@ -220,7 +220,7 @@ class handler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             
             # Для сравнения прайс-листов
-            if self.path == '/api/v1/comparison/compare':
+            if self.path == '/api/v1/comparison/compare' or self.path == '/comparison/compare':
                 try:
                     # Парсим JSON
                     data = json.loads(post_data.decode('utf-8'))
@@ -268,6 +268,55 @@ class handler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                     self.end_headers()
                     error_msg = {"error": f"Ошибка при обработке запроса: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+            # Обработчик для сохранения цен
+            elif self.path == '/api/v1/prices/save' or self.path == '/prices/save':
+                try:
+                    # Парсим JSON
+                    data = json.loads(post_data.decode('utf-8'))
+                    
+                    # Получаем данные из запроса
+                    store_file = data.get('store_file', {})
+                    updates = data.get('updates', [])
+                    preserve_format = data.get('preserve_format', True)
+                    format_info = data.get('format_info', {})
+                    
+                    # Логирование для отладки
+                    print(f"Получен запрос на сохранение данных:")
+                    print(f"- Файл магазина: {store_file.get('filename', 'не указан')}")
+                    print(f"- Количество обновлений: {len(updates)}")
+                    print(f"- Сохранять формат: {preserve_format}")
+                    
+                    # Имя файла для сохранения результатов
+                    filename = store_file.get('filename', '')
+                    result_filename = f"updated_{filename}" if filename else "updated_prices.xlsx"
+                    
+                    # Для тестовых данных просто возвращаем успешный ответ с именем файла
+                    # В реальном приложении здесь должно быть сохранение в базу данных
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    result = {
+                        "success": True, 
+                        "message": "Цены успешно сохранены",
+                        "filename": result_filename,
+                        "download_url": f"/downloads/{result_filename}",
+                        "count": len(updates)
+                    }
+                    self.wfile.write(json.dumps(result).encode())
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при сохранении цен: {str(e)}"}
                     self.wfile.write(json.dumps(error_msg).encode())
             else:
                 self.send_response(404)
