@@ -5,6 +5,30 @@ import pandas as pd
 import io
 from supabase import create_client
 
+# Тестовые данные для демонстрации
+DEMO_DATA = {
+    "supplier": {
+        "data": [
+            {"Артикул": "12345", "Наименование товара": "Смартфон Samsung Galaxy A54", "Цена поставщика": 29990},
+            {"Артикул": "23456", "Наименование товара": "Наушники Sony WH-1000XM5", "Цена поставщика": 34990},
+            {"Артикул": "34567", "Наименование товара": "Ноутбук Lenovo IdeaPad 3", "Цена поставщика": 45990},
+            {"Артикул": "45678", "Наименование товара": "Планшет Apple iPad 10.2", "Цена поставщика": 29990},
+            {"Артикул": "56789", "Наименование товара": "Умные часы Huawei Watch GT3", "Цена поставщика": 18990}
+        ],
+        "columns": ["Артикул", "Наименование товара", "Цена поставщика"]
+    },
+    "store": {
+        "data": [
+            {"Артикул": "12345", "Наименование товара": "Смартфон Samsung Galaxy A54", "Цена магазина": 32990},
+            {"Артикул": "23456", "Наименование товара": "Наушники Sony WH-1000XM5", "Цена магазина": 37990},
+            {"Артикул": "34567", "Наименование товара": "Ноутбук Lenovo IdeaPad 3", "Цена магазина": 49990},
+            {"Артикул": "45678", "Наименование товара": "Планшет Apple iPad 10.2", "Цена магазина": 32990},
+            {"Артикул": "67890", "Наименование товара": "Фотоаппарат Canon EOS M50", "Цена магазина": 59990}
+        ],
+        "columns": ["Артикул", "Наименование товара", "Цена магазина"]
+    }
+}
+
 # Инициализация Supabase
 def get_supabase_client():
     supabase_url = os.environ.get("SUPABASE_URL")
@@ -44,32 +68,57 @@ def read_file(file_content, extension, encoding, separator):
         print(f"Ошибка при чтении файла: {str(e)}")
         return None
 
+# Функция для получения тестовых данных
+def get_demo_dataframe(file_type):
+    data = DEMO_DATA.get(file_type, DEMO_DATA["supplier"])
+    return pd.DataFrame(data["data"])
+
 # Функция для сравнения файлов
 def compare_files(supplier_file_info, store_file_info):
     try:
-        # Получаем файлы из Supabase
-        supplier_content = get_file_content(supplier_file_info['stored_filename'])
-        store_content = get_file_content(store_file_info['stored_filename'])
+        # Проверяем, если это тестовые данные (имя файла содержит mock)
+        is_demo = 'mock' in supplier_file_info.get('stored_filename', '') or 'mock' in store_file_info.get('stored_filename', '')
         
-        if not supplier_content or not store_content:
-            return {"error": "Не удалось получить файлы из хранилища"}
-        
-        # Получаем информацию о колонках
-        supplier_mapping = supplier_file_info.get('column_mapping', {})
-        store_mapping = store_file_info.get('column_mapping', {})
-        
-        if not supplier_mapping or not store_mapping:
-            return {"error": "Отсутствует маппинг колонок"}
-        
-        # Читаем файлы
-        supplier_ext = os.path.splitext(supplier_file_info['original_filename'])[1].lower()
-        store_ext = os.path.splitext(store_file_info['original_filename'])[1].lower()
-        
-        supplier_df = read_file(supplier_content, supplier_ext, supplier_file_info.get('encoding', 'utf-8'), supplier_file_info.get('separator', ','))
-        store_df = read_file(store_content, store_ext, store_file_info.get('encoding', 'utf-8'), store_file_info.get('separator', ','))
-        
-        if supplier_df is None or store_df is None:
-            return {"error": "Ошибка при чтении файлов"}
+        if is_demo:
+            print("Использую тестовые данные для демонстрации API")
+            supplier_df = get_demo_dataframe("supplier")
+            store_df = get_demo_dataframe("store")
+            
+            # Получаем информацию о колонках из тестовых данных
+            supplier_mapping = {
+                "article_column": "Артикул",
+                "price_column": "Цена поставщика",
+                "name_column": "Наименование товара"
+            }
+            store_mapping = {
+                "article_column": "Артикул",
+                "price_column": "Цена магазина",
+                "name_column": "Наименование товара"
+            }
+        else:
+            # Получаем файлы из Supabase
+            supplier_content = get_file_content(supplier_file_info['stored_filename'])
+            store_content = get_file_content(store_file_info['stored_filename'])
+            
+            if not supplier_content or not store_content:
+                return {"error": "Не удалось получить файлы из хранилища"}
+            
+            # Получаем информацию о колонках
+            supplier_mapping = supplier_file_info.get('column_mapping', {})
+            store_mapping = store_file_info.get('column_mapping', {})
+            
+            if not supplier_mapping or not store_mapping:
+                return {"error": "Отсутствует маппинг колонок"}
+            
+            # Читаем файлы
+            supplier_ext = os.path.splitext(supplier_file_info['original_filename'])[1].lower()
+            store_ext = os.path.splitext(store_file_info['original_filename'])[1].lower()
+            
+            supplier_df = read_file(supplier_content, supplier_ext, supplier_file_info.get('encoding', 'utf-8'), supplier_file_info.get('separator', ','))
+            store_df = read_file(store_content, store_ext, store_file_info.get('encoding', 'utf-8'), store_file_info.get('separator', ','))
+            
+            if supplier_df is None or store_df is None:
+                return {"error": "Ошибка при чтении файлов"}
         
         # Колонки для сравнения
         supplier_article_col = supplier_mapping.get('article_column')
@@ -97,8 +146,8 @@ def compare_files(supplier_file_info, store_file_info):
         for article, supplier_price in supplier_dict.items():
             if article in store_dict:
                 store_price = store_dict[article]
-                price_diff = store_price - supplier_price
-                price_diff_percent = (price_diff / supplier_price) * 100 if supplier_price > 0 else 0
+                price_diff = float(store_price) - float(supplier_price)
+                price_diff_percent = (price_diff / float(supplier_price)) * 100 if float(supplier_price) > 0 else 0
                 
                 # Получаем названия товаров если они есть
                 supplier_name = supplier_df.loc[supplier_df[supplier_article_col] == article, supplier_name_col].iloc[0] if supplier_name_col else None
@@ -110,8 +159,8 @@ def compare_files(supplier_file_info, store_file_info):
                     "store_price": float(store_price),
                     "price_diff": float(price_diff),
                     "price_diff_percent": float(price_diff_percent),
-                    "supplier_name": supplier_name if supplier_name_col else None,
-                    "store_name": store_name if store_name_col else None
+                    "supplier_name": str(supplier_name) if supplier_name_col else None,
+                    "store_name": str(store_name) if store_name_col else None
                 })
             else:
                 # Товар есть у поставщика, но нет в магазине
@@ -119,7 +168,7 @@ def compare_files(supplier_file_info, store_file_info):
                 missing_in_store.append({
                     "article": article,
                     "supplier_price": float(supplier_price),
-                    "supplier_name": supplier_name if supplier_name_col else None
+                    "supplier_name": str(supplier_name) if supplier_name_col else None
                 })
         
         # Товары, которые есть в магазине, но нет у поставщика
@@ -129,7 +178,7 @@ def compare_files(supplier_file_info, store_file_info):
                 missing_in_supplier.append({
                     "article": article,
                     "store_price": float(store_price),
-                    "store_name": store_name if store_name_col else None
+                    "store_name": str(store_name) if store_name_col else None
                 })
         
         return {
