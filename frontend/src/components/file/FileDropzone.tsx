@@ -59,39 +59,43 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       setLoading(true);
       setError(null);
       
-      // Здесь будет вызов API для загрузки файла
-      try {
-        // Проверяем, используем ли реальный API или моки
-        if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-          const fileInfo = await fileService.uploadFile(file, fileType);
+      // Проверяем, используем ли реальный API или моки
+      const useRealApi = process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true';
+      console.log(`Режим API: ${useRealApi ? 'Реальный API' : 'Mock API'}, file: ${file.name}`);
+      
+      if (useRealApi) {
+        // Используем реальный API для загрузки
+        console.log('Загрузка файла через реальный API');
+        const fileInfo = await fileService.uploadFile(file, fileType);
+        onFileUploaded(fileInfo);
+        setFileUploaded(true);
+      } else {
+        // Для демонстрации просто имитируем загрузку
+        console.log('Загрузка файла через Mock API');
+        setTimeout(() => {
+          // Для файлов с mock_ в имени не добавляем префикс, иначе добавляем
+          const mockFilename = file.name.toLowerCase().includes('mock_') 
+            ? file.name 
+            : 'mock_' + file.name;
+            
+          const fileInfo = {
+            id: 'mock-id-' + Date.now(),
+            original_filename: file.name,
+            stored_filename: mockFilename,
+            file_type: fileType,
+            encoding: 'utf-8',
+            separator: ','
+          };
+          
+          console.log('Создан фейковый объект FileInfo:', fileInfo);
           onFileUploaded(fileInfo);
           setFileUploaded(true);
-        } else {
-          // Для демонстрации просто имитируем загрузку
-          setTimeout(() => {
-            const mockFilename = file.name.toLowerCase().includes('mock') 
-              ? file.name 
-              : 'mock_' + file.name;
-              
-            const fileInfo = {
-              id: 'mock-id-' + Date.now(),
-              original_filename: file.name,
-              stored_filename: mockFilename,
-              file_type: fileType,
-              encoding: 'utf-8',
-              separator: ','
-            };
-            
-            onFileUploaded(fileInfo);
-            setFileUploaded(true);
-          }, 1000);
-        }
-      } finally {
-        setLoading(false);
+        }, 1000);
       }
-      
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке файла.');
+      console.error('Ошибка при загрузке файла:', err);
+    } finally {
       setLoading(false);
     }
   }, [fileType, maxSize, onFileUploaded]);

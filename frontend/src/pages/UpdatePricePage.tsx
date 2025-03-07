@@ -71,6 +71,7 @@ const UpdatePricePage: React.FC = () => {
   const [updateCompleted, setUpdateCompleted] = useState(false);
   const [errorOccurred, setErrorOccurred] = useState(false);
   const [openDialog, setOpenDialog] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   
   // Шаги процесса обновления цен
   const steps = [
@@ -140,7 +141,6 @@ const UpdatePricePage: React.FC = () => {
         setUpdatedFile(response);
         setUpdateCompleted(true);
         setIsUpdating(false);
-        setActiveStep(prevStep => prevStep + 1); // Переходим к следующему шагу
         setSuccess(true); // Устанавливаем флаг успешного завершения для отображения финального шага
       })
       .catch((error) => {
@@ -168,44 +168,110 @@ const UpdatePricePage: React.FC = () => {
   // Функция для скачивания обновленного файла
   const handleDownloadFile = () => {
     if (!updatedFile) {
+      console.error('Ошибка скачивания: информация о файле не найдена');
       setError('Ошибка: информация о файле не найдена');
       return;
     }
     
     try {
-      // Проверяем, является ли URL абсолютным или относительным
-      let downloadUrl = updatedFile.download_url;
+      console.log('=== Начало процесса скачивания файла ===');
+      console.log('Информация о файле:', updatedFile);
       
-      // Если URL не начинается с http и мы в режиме разработки, добавляем базовый URL API
-      if (!downloadUrl.startsWith('http') && process.env.NODE_ENV !== 'production') {
-        const baseApiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-        downloadUrl = `${baseApiUrl}${downloadUrl}`;
-      }
+      setIsDownloading(true);
       
-      console.log('Скачивание файла:', updatedFile.filename, 'URL:', downloadUrl);
+      // Получаем базовый URL API без /api/v1 на конце
+      const baseApiUrl = process.env.REACT_APP_API_URL 
+        ? process.env.REACT_APP_API_URL.replace(/\/api\/v1$/, '')
+        : 'http://localhost:8000';
       
-      // Для тестирования - если скачивание не работает, предложим альтернативу
-      if (downloadUrl.includes('mock') || updatedFile.filename.includes('mock')) {
-        console.log('Используется тестовое скачивание файла');
-        alert('Это демонстрационный режим. В реальной версии здесь было бы скачивание файла.');
-        return;
-      }
+      // Формируем правильный URL для скачивания
+      const downloadUrl = `${baseApiUrl}${updatedFile.download_url}`;
       
-      // Создаем ссылку для скачивания
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.setAttribute('download', updatedFile.filename);
-      link.setAttribute('target', '_blank');
-      document.body.appendChild(link);
-      link.click();
+      console.log('URL для скачивания:', downloadUrl);
+      console.log('Начало fetch-запроса...');
       
-      // Небольшая задержка перед удалением элемента
-      setTimeout(() => {
-        document.body.removeChild(link);
-      }, 100);
-    } catch (err: any) {
-      console.error('Ошибка при скачивании файла:', err);
-      setError('Не удалось скачать файл: ' + (err.message || 'Неизвестная ошибка'));
+      // Используем fetch для получения содержимого файла
+      fetch(downloadUrl)
+        .then(response => {
+          console.log('Получен ответ от сервера:', {
+            status: response.status,
+            statusText: response.statusText,
+            headers: Array.from(response.headers).reduce((obj, [key, value]) => {
+              obj[key] = value;
+              return obj;
+            }, {} as Record<string, string>),
+            type: response.type,
+            url: response.url
+          });
+          
+          if (!response.ok) {
+            throw new Error(`Ошибка при скачивании файла: ${response.status} ${response.statusText}`);
+          }
+          
+          console.log('Преобразование ответа в blob...');
+          return response.blob();
+        })
+        .then(blob => {
+          console.log('Получен blob:', {
+            size: blob.size,
+            type: blob.type
+          });
+          
+          // Создаем объект Blob с указанием правильного MIME-типа для CSV
+          const csvBlob = new Blob([blob], { type: 'text/csv;charset=utf-8' });
+          console.log('Создан новый blob с типом text/csv:', {
+            size: csvBlob.size,
+            type: csvBlob.type
+          });
+          
+          // Создаем URL для blob
+          const url = window.URL.createObjectURL(csvBlob);
+          console.log('Создан URL для blob:', url);
+          
+          // Создаем ссылку для скачивания
+          const link = document.createElement('a');
+          link.href = url;
+          link.setAttribute('download', updatedFile.filename);
+          
+          console.log('Создана ссылка для скачивания:', {
+            href: link.href,
+            download: link.download
+          });
+          
+          // Добавляем, кликаем и удаляем
+          document.body.appendChild(link);
+          console.log('Запуск скачивания...');
+          link.click();
+          
+          // Удаляем ссылку и освобождаем URL
+          setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+            setIsDownloading(false);
+            console.log('Скачивание завершено, ресурсы освобождены');
+            console.log('=== Конец процесса скачивания файла ===');
+          }, 100);
+        })
+        .catch(error => {
+          console.error('=== Ошибка при скачивании файла ===');
+          console.error('Детали ошибки:', error);
+          console.error('Информация о запросе:', {
+            url: downloadUrl,
+            fileInfo: updatedFile
+          });
+          
+          setError(`Ошибка при скачивании файла: ${error.message}`);
+          setIsDownloading(false);
+          console.log('=== Процесс скачивания прерван из-за ошибки ===');
+        });
+    } catch (err) {
+      console.error('=== Критическая ошибка при скачивании файла ===');
+      console.error('Необработанное исключение:', err);
+      console.error('Стек вызовов:', new Error().stack);
+      
+      setError(`Ошибка при скачивании файла: ${err}`);
+      setIsDownloading(false);
+      console.log('=== Процесс скачивания прерван из-за критической ошибки ===');
     }
   };
   
@@ -489,8 +555,9 @@ const UpdatePricePage: React.FC = () => {
                             variant="contained"
                             color="secondary"
                             size="large"
-                            startIcon={<GetAppIcon />}
+                            startIcon={isDownloading ? <CircularProgress size={20} color="inherit" /> : <GetAppIcon />}
                             onClick={handleDownloadFile}
+                            disabled={isDownloading}
                             sx={{ 
                               px: 3,
                               py: 1.5,
@@ -498,7 +565,7 @@ const UpdatePricePage: React.FC = () => {
                               boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
                             }}
                           >
-                            Скачать обновленный файл
+                            {isDownloading ? 'Скачивание...' : 'Скачать обновленный файл'}
                           </Button>
                           
                           <Button 
@@ -522,12 +589,12 @@ const UpdatePricePage: React.FC = () => {
                     variant="contained"
                     onClick={handleNext}
                     sx={{ mt: 1, mr: 1 }}
-                    disabled={loading || selectedItems.length === 0 || updateCompleted}
+                    disabled={loading || selectedItems.length === 0}
                   >
                     {index === steps.length - 1 ? 'Завершить' : 'Продолжить'}
                   </Button>
                   <Button
-                    disabled={index === 0 || loading || updateCompleted}
+                    disabled={index === 0 || loading}
                     onClick={handleBack}
                     sx={{ mt: 1, mr: 1 }}
                   >

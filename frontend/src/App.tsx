@@ -10,6 +10,7 @@ import HomePage from './pages/HomePage';
 import FileUploadPage from './pages/FileUploadPage';
 import ComparisonPage from './pages/ComparisonPage';
 import UpdatePricePage from './pages/UpdatePricePage';
+import UserActionLogger from './components/UserActionLogger';
 
 // Создаем тему для Material UI
 const theme = createTheme({
@@ -39,13 +40,14 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Router>
+        <UserActionLogger />
         <Header />
         <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/upload" element={<FileUploadPage />} />
             <Route path="/comparison" element={<ComparisonPage />} />
-            <Route path="/update" element={<UpdatePricePage />} />
+            <Route path="/update-prices" element={<UpdatePricePage />} />
           </Routes>
         </Container>
       </Router>

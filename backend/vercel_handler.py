@@ -6,29 +6,6 @@ import io
 from supabase import create_client
 import time
 
-# Тестовые данные для демонстрации
-DEMO_DATA = {
-    "supplier": {
-        "data": [
-            {"Артикул": "12345", "Наименование товара": "Смартфон Samsung Galaxy A54", "Цена поставщика": 29990},
-            {"Артикул": "23456", "Наименование товара": "Наушники Sony WH-1000XM5", "Цена поставщика": 34990},
-            {"Артикул": "34567", "Наименование товара": "Ноутбук Lenovo IdeaPad 3", "Цена поставщика": 45990},
-            {"Артикул": "45678", "Наименование товара": "Планшет Apple iPad 10.2", "Цена поставщика": 29990},
-            {"Артикул": "56789", "Наименование товара": "Умные часы Huawei Watch GT3", "Цена поставщика": 18990}
-        ],
-        "columns": ["Артикул", "Наименование товара", "Цена поставщика"]
-    },
-    "store": {
-        "data": [
-            {"Артикул": "12345", "Наименование товара": "Смартфон Samsung Galaxy A54", "Цена магазина": 32990},
-            {"Артикул": "23456", "Наименование товара": "Наушники Sony WH-1000XM5", "Цена магазина": 37990},
-            {"Артикул": "34567", "Наименование товара": "Ноутбук Lenovo IdeaPad 3", "Цена магазина": 49990},
-            {"Артикул": "45678", "Наименование товара": "Планшет Apple iPad 10.2", "Цена магазина": 32990},
-            {"Артикул": "67890", "Наименование товара": "Фотоаппарат Canon EOS M50", "Цена магазина": 59990}
-        ],
-        "columns": ["Артикул", "Наименование товара", "Цена магазина"]
-    }
-}
 
 # Инициализация Supabase
 def get_supabase_client():
@@ -69,57 +46,33 @@ def read_file(file_content, extension, encoding, separator):
         print(f"Ошибка при чтении файла: {str(e)}")
         return None
 
-# Функция для получения тестовых данных
-def get_demo_dataframe(file_type):
-    data = DEMO_DATA.get(file_type, DEMO_DATA["supplier"])
-    return pd.DataFrame(data["data"])
 
 # Функция для сравнения файлов
 def compare_files(supplier_file_info, store_file_info):
     try:
-        # Проверяем, если это тестовые данные (имя файла содержит mock)
-        is_demo = 'mock' in supplier_file_info.get('stored_filename', '') or 'mock' in store_file_info.get('stored_filename', '')
+        # Получаем файлы из Supabase
+        supplier_content = get_file_content(supplier_file_info['stored_filename'])
+        store_content = get_file_content(store_file_info['stored_filename'])
         
-        if is_demo:
-            print("Использую тестовые данные для демонстрации API")
-            supplier_df = get_demo_dataframe("supplier")
-            store_df = get_demo_dataframe("store")
-            
-            # Получаем информацию о колонках из тестовых данных
-            supplier_mapping = {
-                "article_column": "Артикул",
-                "price_column": "Цена поставщика",
-                "name_column": "Наименование товара"
-            }
-            store_mapping = {
-                "article_column": "Артикул",
-                "price_column": "Цена магазина",
-                "name_column": "Наименование товара"
-            }
-        else:
-            # Получаем файлы из Supabase
-            supplier_content = get_file_content(supplier_file_info['stored_filename'])
-            store_content = get_file_content(store_file_info['stored_filename'])
-            
-            if not supplier_content or not store_content:
-                return {"error": "Не удалось получить файлы из хранилища"}
-            
-            # Получаем информацию о колонках
-            supplier_mapping = supplier_file_info.get('column_mapping', {})
-            store_mapping = store_file_info.get('column_mapping', {})
-            
-            if not supplier_mapping or not store_mapping:
-                return {"error": "Отсутствует маппинг колонок"}
-            
-            # Читаем файлы
-            supplier_ext = os.path.splitext(supplier_file_info['original_filename'])[1].lower()
-            store_ext = os.path.splitext(store_file_info['original_filename'])[1].lower()
-            
-            supplier_df = read_file(supplier_content, supplier_ext, supplier_file_info.get('encoding', 'utf-8'), supplier_file_info.get('separator', ','))
-            store_df = read_file(store_content, store_ext, store_file_info.get('encoding', 'utf-8'), store_file_info.get('separator', ','))
-            
-            if supplier_df is None or store_df is None:
-                return {"error": "Ошибка при чтении файлов"}
+        if not supplier_content or not store_content:
+            return {"error": "Не удалось получить файлы из хранилища"}
+        
+        # Получаем информацию о колонках
+        supplier_mapping = supplier_file_info.get('column_mapping', {})
+        store_mapping = store_file_info.get('column_mapping', {})
+        
+        if not supplier_mapping or not store_mapping:
+            return {"error": "Отсутствует маппинг колонок"}
+        
+        # Читаем файлы
+        supplier_ext = os.path.splitext(supplier_file_info['original_filename'])[1].lower()
+        store_ext = os.path.splitext(store_file_info['original_filename'])[1].lower()
+        
+        supplier_df = read_file(supplier_content, supplier_ext, supplier_file_info.get('encoding', 'utf-8'), supplier_file_info.get('separator', ','))
+        store_df = read_file(store_content, store_ext, store_file_info.get('encoding', 'utf-8'), store_file_info.get('separator', ','))
+        
+        if supplier_df is None or store_df is None:
+            return {"error": "Ошибка при чтении файлов"}
         
         # Колонки для сравнения
         supplier_article_col = supplier_mapping.get('article_column')
@@ -208,9 +161,6 @@ class handler(BaseHTTPRequestHandler):
                 
                 print(f"Получен запрос на получение колонок файла: {filename}")
                 
-                # Для демонстрации возвращаем моковые колонки
-                # В реальном приложении здесь должен быть код для чтения файла и получения колонок
-                
                 # Определяем тип файла по имени
                 is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
                 
@@ -265,7 +215,6 @@ class handler(BaseHTTPRequestHandler):
                     if 'multipart/form-data' in content_type:
                         print("Получен запрос на загрузку файла (multipart/form-data)")
                         
-                        # Для демонстрации просто возвращаем успешный ответ с моковыми данными
                         # В реальном приложении здесь должен быть код для обработки multipart/form-data и сохранения файла
                         
                         filename = "mock_file.csv"  # В реальном приложении извлекается из запроса
@@ -319,7 +268,6 @@ class handler(BaseHTTPRequestHandler):
                     
                     print(f"Получен запрос на сохранение маппинга колонок для файла: {data.get('original_filename', 'неизвестный')}")
                     
-                    # Для демонстрации просто возвращаем тот же объект
                     # В реальном приложении здесь должен быть код для сохранения маппинга
                     
                     # Отправляем успешный ответ
@@ -412,7 +360,6 @@ class handler(BaseHTTPRequestHandler):
                     filename = store_file.get('filename', '')
                     result_filename = f"updated_{filename}" if filename else "updated_prices.xlsx"
                     
-                    # Для тестовых данных просто возвращаем успешный ответ с именем файла
                     # В реальном приложении здесь должно быть сохранение в базу данных
                     
                     # Отправляем успешный ответ
@@ -453,7 +400,6 @@ class handler(BaseHTTPRequestHandler):
                     print(f"Получен запрос на обновление цен для файла магазина: {store_file.get('original_filename', 'неизвестный')}")
                     print(f"Количество обновлений: {len(updates)}")
                     
-                    # Для демонстрации просто возвращаем те же обновления
                     # В реальном приложении здесь должна быть логика обновления цен в файле
                     
                     # Отправляем успешный ответ

@@ -2,7 +2,13 @@ import os
 from typing import List
 from pydantic_settings import BaseSettings
 
+# Определение базового каталога проекта
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 class Settings(BaseSettings):
+    # Базовый каталог
+    BASE_DIR: str = BASE_DIR
+    
     # Базовые настройки API
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "PriceManager"
@@ -39,4 +45,8 @@ settings = Settings()
 
 # Создаем директорию для загруженных файлов, если не используем облачное хранилище
 if not settings.USE_CLOUD_STORAGE:
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True) 
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+
+# Создаем директорию для демо данных
+demo_data_dir = os.path.join(settings.BASE_DIR, 'demo_data')
+os.makedirs(demo_data_dir, exist_ok=True) 

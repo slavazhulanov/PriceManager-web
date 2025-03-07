@@ -31,6 +31,8 @@ import {
 import { comparisonService } from '../services/api';
 import InfoIcon from '@mui/icons-material/Info';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import useLogger from '../hooks/useLogger';
+import LogButton from '../components/ui/LogButton';
 
 interface LocationState {
   supplierFile: FileInfo;
@@ -75,6 +77,9 @@ const ComparisonPage: React.FC = () => {
   const [comparisonResult, setComparisonResult] = useState<ComparisonResult | null>(null);
   const [selectedItems, setSelectedItems] = useState<MatchedItem[]>([]);
   const gridApiRef = useRef<any>(null);
+  
+  // Инициализация логгера для страницы
+  const logger = useLogger('ComparisonPage');
   
   // Статистика
   const getStatistics = () => {
@@ -224,6 +229,7 @@ const ComparisonPage: React.FC = () => {
     const compareFiles = async () => {
       if (!state?.supplierFile || !state?.storeFile) {
         setError('Не найдены файлы для сравнения. Пожалуйста, вернитесь на страницу загрузки файлов.');
+        logger.logUserAction('error', 'comparison', { error: 'missing_files' });
         return;
       }
       
@@ -231,147 +237,86 @@ const ComparisonPage: React.FC = () => {
         setLoading(true);
         setError(null);
         
-        // В реальном приложении вызываем API
-        if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-          try {
-            const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
-            console.log('Данные для сравнения успешно загружены:', result);
-            setComparisonResult(result);
-            
-            // Выбираем все товары по умолчанию
-            if (result && result.matches) {
-              setSelectedItems(result.matches);
-            }
-          } catch (apiError: any) {
-            console.error('Ошибка API при сравнении файлов:', apiError);
-            setError(`Ошибка при сравнении файлов: ${apiError}`);
-          }
+        logger.logUserAction('comparison_start', 'comparison', {
+          supplier_file: state.supplierFile.original_filename,
+          store_file: state.storeFile.original_filename
+        });
+        
+        console.log('Отправляемые данные:', {
+          supplier_file: state.supplierFile,
+          store_file: state.storeFile,
+        });
+
+        const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
+        console.log('Результат сравнения:', result);
+
+        if (result && result.matches && result.matches.length > 0) {
+          setComparisonResult(result);
+          setSelectedItems(result.matches);
+          
+          // Логируем успешное сравнение
+          logger.logUserAction('comparison_success', 'comparison', {
+            matches_count: result.matches.length,
+            missing_in_store_count: result.missing_in_store.length,
+            missing_in_supplier_count: result.missing_in_supplier.length
+          });
         } else {
-          // Для демонстрации используем моковые данные
-          const mockResult: ComparisonResult = {
-            matches: [
-              { 
-                article: '10001', 
-                supplier_name: 'Смартфон Samsung Galaxy A54', 
-                store_name: 'Samsung Galaxy A54 128GB', 
-                supplier_price: 27990, 
-                store_price: 29990, 
-                price_diff: -2000, 
-                price_diff_percent: -6.67
-              },
-              { 
-                article: '10002', 
-                supplier_name: 'Ноутбук ASUS VivoBook 15', 
-                store_name: 'ASUS VivoBook 15 K513', 
-                supplier_price: 45990, 
-                store_price: 48990, 
-                price_diff: -3000, 
-                price_diff_percent: -6.12
-              },
-              { 
-                article: '10003', 
-                supplier_name: 'Наушники Sony WH-1000XM5', 
-                store_name: 'Sony WH-1000XM5 Black', 
-                supplier_price: 32490, 
-                store_price: 34990, 
-                price_diff: -2500, 
-                price_diff_percent: -7.14
-              },
-              { 
-                article: '10005', 
-                supplier_name: 'Телевизор LG OLED C3', 
-                store_name: 'LG OLED C3 55" 4K', 
-                supplier_price: 119900, 
-                store_price: 115990, 
-                price_diff: 3910, 
-                price_diff_percent: 3.37
-              },
-              { 
-                article: '10007', 
-                supplier_name: 'Видеокарта NVIDIA GeForce RTX 4070', 
-                store_name: 'NVIDIA GeForce RTX 4070 Founders Edition', 
-                supplier_price: 78990, 
-                store_price: 82990, 
-                price_diff: -4000, 
-                price_diff_percent: -4.82
-              },
-              { 
-                article: '10008', 
-                supplier_name: 'Монитор Samsung Odyssey G5', 
-                store_name: 'Samsung Odyssey G5 27"', 
-                supplier_price: 29990, 
-                store_price: 32990, 
-                price_diff: -3000, 
-                price_diff_percent: -9.09
-              },
-              { 
-                article: '10009', 
-                supplier_name: 'Умные часы Apple Watch Series 8', 
-                store_name: 'Apple Watch Series 8 GPS 41mm', 
-                supplier_price: 36990, 
-                store_price: 38990, 
-                price_diff: -2000, 
-                price_diff_percent: -5.13
-              },
-              { 
-                article: '10012', 
-                supplier_name: 'Робот-пылесос Xiaomi Robot Vacuum', 
-                store_name: 'Xiaomi Robot Vacuum S10', 
-                supplier_price: 22990, 
-                store_price: 24990, 
-                price_diff: -2000, 
-                price_diff_percent: -8.00
-              }
-            ],
-            missing_in_store: [
-              { article: '10004', supplier_name: 'Планшет Apple iPad Air', supplier_price: 58990 },
-              { article: '10006', supplier_name: 'Игровая приставка Sony PlayStation 5', supplier_price: 49990 },
-              { article: '10010', supplier_name: 'Холодильник Bosch Serie 4', supplier_price: 75990 },
-              { article: '10011', supplier_name: 'Фотоаппарат Canon EOS R6', supplier_price: 199990 },
-              { article: '10013', supplier_name: 'Клавиатура Logitech G Pro', supplier_price: 12990 },
-              { article: '10014', supplier_name: 'Принтер HP LaserJet', supplier_price: 18990 },
-              { article: '10015', supplier_name: 'Усилитель звука Denon PMA-600NE', supplier_price: 42990 }
-            ],
-            missing_in_supplier: [
-              { article: '10016', store_name: 'Sony PlayStation DualSense', store_price: 7990 },
-              { article: '10017', store_name: 'Яндекс Станция Лайт', store_price: 5990 },
-              { article: '10018', store_name: 'Apple AirPods Pro 2', store_price: 22990 },
-              { article: '10019', store_name: 'Samsung Galaxy S23 Ultra', store_price: 99990 },
-              { article: '10020', store_name: 'Logitech MX Master 3S', store_price: 8990 }
-            ]
-          };
+          console.warn('Нет совпадений для отображения!');
+          setError('Нет данных для сравнения');
           
-          console.log('Данные для сравнения готовы (моки):', mockResult);
-          setComparisonResult(mockResult);
-          
-          // Выбираем все товары по умолчанию для обновления цен
-          setSelectedItems(mockResult.matches);
+          // Логируем отсутствие результатов
+          logger.logUserAction('comparison_no_results', 'comparison', {});
         }
-        
-        setLoading(false);
-        
-        // Убедимся, что сверху страницы
-        window.scrollTo(0, 0);
-        
       } catch (err: any) {
-        console.error('Общая ошибка при сравнении файлов:', err);
+        console.error('Ошибка при сравнении файлов:', err);
+        if (err.response) {
+          console.error('Ответ от сервера:', err.response.data);
+        }
         setError('Ошибка при сравнении файлов: ' + (err.message || 'Неизвестная ошибка'));
+        
+        // Логируем ошибку
+        logger.logUserAction('comparison_error', 'comparison', {
+          error_message: err.message || 'Неизвестная ошибка',
+          status: err.response?.status
+        });
+      } finally {
         setLoading(false);
+        window.scrollTo(0, 0);
       }
     };
     
     compareFiles();
-  }, [state]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Обработчик изменения вкладки
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+    
+    // Логируем переключение вкладки
+    const tabNames = ['matches', 'missing_in_store', 'missing_in_supplier'];
+    logger.logTabSwitch(tabNames[newValue]);
   };
   
-  // Обработчик выбора строк в таблице совпадений
-  const onSelectionChanged = (event: any) => {
-    const selectedRows = event.api.getSelectedRows();
-    setSelectedItems(selectedRows);
+  // Обработчик выбора строк
+  const onSelectionChanged = () => {
+    if (gridApiRef.current) {
+      const selectedRows = gridApiRef.current.api.getSelectedRows();
+      setSelectedItems(selectedRows);
+      
+      // Логируем выбор строк
+      logger.logUserAction('rows_selected', 'data_grid', { 
+        count: selectedRows.length 
+      });
+    }
+  };
+  
+  // Обработчик клика по строке
+  const onRowClicked = (event: any) => {
+    // Логируем клик по строке
+    logger.logUserAction('row_click', 'data_grid', { 
+      article: event.data.article
+    });
   };
   
   // Обработчик инициализации таблицы
@@ -420,14 +365,18 @@ const ComparisonPage: React.FC = () => {
         <Alert severity="error" sx={{ mt: 3 }}>
           {error}
         </Alert>
-        <Box sx={{ mt: 3 }}>
-          <Button 
-            variant="contained" 
-            onClick={() => navigate('/upload')}
-          >
-            Вернуться к загрузке файлов
-          </Button>
-        </Box>
+        {!loading && !comparisonResult && (
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+            <LogButton 
+              logName="return_to_upload"
+              pageName="ComparisonPage"
+              variant="contained" 
+              onClick={() => navigate('/upload')}
+            >
+              Вернуться к загрузке файлов
+            </LogButton>
+          </Box>
+        )}
       </Container>
     );
   }
@@ -454,14 +403,18 @@ const ComparisonPage: React.FC = () => {
         <Alert severity="warning" sx={{ mt: 3 }}>
           Нет данных для сравнения
         </Alert>
-        <Box sx={{ mt: 3 }}>
-          <Button 
-            variant="contained" 
-            onClick={() => navigate('/upload')}
-          >
-            Загрузить файлы
-          </Button>
-        </Box>
+        {!loading && (
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+            <LogButton 
+              logName="return_to_upload"
+              pageName="ComparisonPage"
+              variant="contained" 
+              onClick={() => navigate('/upload')}
+            >
+              Вернуться к загрузке файлов
+            </LogButton>
+          </Box>
+        )}
       </Container>
     );
   }
@@ -549,14 +502,24 @@ const ComparisonPage: React.FC = () => {
         
         <TabPanel value={tabValue} index={0}>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
-            <Button 
-              variant="contained" 
-              color="primary" 
-              onClick={handleGoToUpdate}
+            <LogButton
+              logName="go_to_updates"
+              pageName="ComparisonPage"
+              logDetails={{ selected_items_count: selectedItems.length }}
+              variant="contained"
+              color="primary"
               disabled={selectedItems.length === 0}
+              onClick={() => {
+                navigate('/update-prices', {
+                  state: {
+                    selectedItems,
+                    storeFile: state.storeFile
+                  }
+                });
+              }}
             >
-              Обновить цены всех товаров ({comparisonResult?.matches.length || 0})
-            </Button>
+              Обновить цены выбранных товаров ({selectedItems.length})
+            </LogButton>
           </Box>
           
           {/* Отображаем таблицу только если есть данные */}
@@ -599,17 +562,6 @@ const ComparisonPage: React.FC = () => {
               {loading ? "Загрузка данных..." : "Нет совпадающих товаров для отображения"}
             </Alert>
           )}
-          
-          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
-            <Button 
-              variant="contained" 
-              color="primary" 
-              onClick={handleGoToUpdate}
-              disabled={selectedItems.length === 0}
-            >
-              Обновить цены всех товаров ({comparisonResult?.matches.length || 0})
-            </Button>
-          </Box>
         </TabPanel>
         
         <TabPanel value={tabValue} index={1}>
@@ -698,6 +650,39 @@ const ComparisonPage: React.FC = () => {
           )}
         </TabPanel>
       </Box>
+      
+      {/* Кнопки навигации внизу страницы */}
+      {comparisonResult && (
+        <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+          <LogButton
+            logName="go_to_updates"
+            pageName="ComparisonPage"
+            logDetails={{ selected_items_count: selectedItems.length }}
+            variant="contained"
+            color="primary"
+            disabled={selectedItems.length === 0}
+            onClick={() => {
+              navigate('/update-prices', {
+                state: {
+                  selectedItems,
+                  storeFile: state.storeFile
+                }
+              });
+            }}
+          >
+            Обновить цены выбранных товаров ({selectedItems.length})
+          </LogButton>
+          
+          <LogButton
+            logName="return_to_upload"
+            pageName="ComparisonPage"
+            variant="outlined"
+            onClick={() => navigate('/upload')}
+          >
+            Загрузить другие файлы
+          </LogButton>
+        </Box>
+      )}
     </Container>
   );
 };

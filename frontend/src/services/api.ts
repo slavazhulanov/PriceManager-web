@@ -59,7 +59,7 @@ export const fileService = {
     formData.append('file', file);
     formData.append('file_type', fileType);
     
-    const response = await api.post('/files/upload', formData, {
+    const response = await api.post('files/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
@@ -68,19 +68,19 @@ export const fileService = {
     return response.data;
   },
   
-  // Получение списка колонок файла
+  // Получение списка колонок из файла
   async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
-    const params: any = { encoding, separator };
-    // Удаляем undefined параметры
-    Object.keys(params).forEach(key => params[key] === undefined && delete params[key]);
+    const params: any = {};
+    if (encoding) params.encoding = encoding;
+    if (separator) params.separator = separator;
     
-    const response = await api.get(`/files/columns/${filename}`, { params });
+    const response = await api.get(`files/columns/${filename}`, { params });
     return response.data;
   },
   
   // Сохранение сопоставления колонок
   async saveColumnMapping(fileInfo: FileInfo): Promise<FileInfo> {
-    const response = await api.post('/files/mapping', fileInfo);
+    const response = await api.post('files/mapping', fileInfo);
     return response.data;
   },
 };
@@ -89,7 +89,7 @@ export const fileService = {
 export const comparisonService = {
   // Сравнение прайс-листов
   async compareFiles(supplierFile: FileInfo, storeFile: FileInfo): Promise<ComparisonResult> {
-    const response = await api.post('/comparison/compare', {
+    const response = await api.post('comparison/compare', {
       supplier_file: supplierFile,
       store_file: storeFile,
     });
@@ -122,7 +122,7 @@ export const priceService = {
 
   // Обновление цен
   async updatePrices(updates: PriceUpdate[], storeFile: FileInfo): Promise<PriceUpdate[]> {
-    const response = await api.post('/prices/update', {
+    const response = await api.post('prices/update', {
       updates,
       store_file: storeFile,
     });
@@ -133,7 +133,7 @@ export const priceService = {
   // Сохранение обновленного файла
   async saveUpdatedFile(storeFile: FileInfo, updates: PriceUpdate[]): Promise<{ filename: string, download_url: string, count: number }> {
     // Добавляем в запрос информацию о необходимости сохранения оригинального формата файла
-    const response = await api.post('/prices/save', {
+    const response = await api.post('prices/save', {
       store_file: storeFile,
       updates,
       preserve_format: true, // Флаг для явного указания необходимости сохранения формата
