@@ -141,6 +141,7 @@ const UpdatePricePage: React.FC = () => {
         setUpdateCompleted(true);
         setIsUpdating(false);
         setActiveStep(prevStep => prevStep + 1); // Переходим к следующему шагу
+        setSuccess(true); // Устанавливаем флаг успешного завершения для отображения финального шага
       })
       .catch((error) => {
         console.error('Ошибка при обновлении цен:', error);
@@ -422,10 +423,55 @@ const UpdatePricePage: React.FC = () => {
                 </Box>
               )}
               
-              {index === 2 && loading && (
-                <Box sx={{ display: 'flex', alignItems: 'center', mt: 2 }}>
-                  <CircularProgress size={24} sx={{ mr: 1 }} />
-                  <Typography>Обновление цен...</Typography>
+              {index === 2 && (
+                <Box sx={{ mt: 2 }}>
+                  {isUpdating && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <CircularProgress size={24} sx={{ mr: 1 }} />
+                      <Typography>Обновление цен...</Typography>
+                    </Box>
+                  )}
+                  
+                  {errorOccurred && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      <Typography variant="body1" fontWeight="bold">
+                        Произошла ошибка при обновлении цен
+                      </Typography>
+                      <Typography variant="body2">
+                        Пожалуйста, попробуйте еще раз или обратитесь в службу поддержки.
+                      </Typography>
+                    </Alert>
+                  )}
+                  
+                  {updateCompleted && updatedFile && (
+                    <Box>
+                      <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mb: 2 }}>
+                        <Typography variant="body1" fontWeight="bold">
+                          Цены успешно обновлены!
+                        </Typography>
+                        <Typography variant="body2">
+                          Обновлено {selectedItems.length} товаров в соответствии с ценами поставщика.
+                        </Typography>
+                      </Alert>
+                      
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<GetAppIcon />}
+                        onClick={handleDownloadFile}
+                        sx={{ mr: 2 }}
+                      >
+                        Скачать обновленный файл
+                      </Button>
+                      
+                      <Button 
+                        variant="outlined" 
+                        onClick={handleGoToHome}
+                      >
+                        На главную
+                      </Button>
+                    </Box>
+                  )}
                 </Box>
               )}
               
@@ -451,62 +497,6 @@ const UpdatePricePage: React.FC = () => {
             </StepContent>
           </Step>
         ))}
-        
-        {/* Финальный шаг - успешное обновление */}
-        {success && (
-          <Step>
-            <StepLabel>Обновление завершено</StepLabel>
-            <StepContent>
-              <Box sx={{ mt: 2, mb: 2 }}>
-                <Alert severity="success" icon={<CheckCircleIcon />}>
-                  <Typography variant="body1" fontWeight="bold">
-                    Цены успешно обновлены!
-                  </Typography>
-                  <Typography variant="body2">
-                    Обновлено {selectedItems.length} товаров в соответствии с ценами поставщика.
-                  </Typography>
-                  {updatedFile && (
-                    <Box sx={{ mt: 1 }}>
-                      <Typography variant="body2">
-                        Файл с обновленными ценами: <strong>{updatedFile.filename}</strong>
-                      </Typography>
-                      <Typography variant="body2" sx={{ mt: 0.5, color: 'text.secondary' }}>
-                        Формат файла сохранен в соответствии с исходным файлом магазина 
-                        (кодировка: {state.storeFile.encoding}, разделитель: {state.storeFile.separator === ',' ? 'запятая (,)' : state.storeFile.separator === ';' ? 'точка с запятой (;)' : state.storeFile.separator})
-                      </Typography>
-                    </Box>
-                  )}
-                </Alert>
-              </Box>
-              
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                {updatedFile && (
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    startIcon={<GetAppIcon />}
-                    onClick={handleDownloadFile}
-                  >
-                    Скачать обновленный файл
-                  </Button>
-                )}
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={handleGoToHome}
-                >
-                  На главную
-                </Button>
-                <Button
-                  variant="outlined"
-                  onClick={handleBackToComparison}
-                >
-                  Вернуться к сравнению
-                </Button>
-              </Box>
-            </StepContent>
-          </Step>
-        )}
       </Stepper>
       
       {/* Диалог подтверждения */}
