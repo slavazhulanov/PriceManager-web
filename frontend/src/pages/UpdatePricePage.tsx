@@ -110,8 +110,23 @@ const UpdatePricePage: React.FC = () => {
   
   // Обработчик подтверждения обновления цен
   const handleConfirmUpdate = () => {
+    console.log('Начало обработки подтверждения обновления');
     setIsUpdating(true);
     setUpdateCompleted(false);
+    
+    // Закрываем диалог подтверждения
+    setConfirmDialogOpen(false);
+    
+    console.log('Отправка данных для обновления:', {
+      storeFile: state.storeFile,
+      updates: selectedItems.map(item => ({
+        article: item.article,
+        old_price: item.store_price,
+        new_price: item.supplier_price,
+        supplier_name: item.supplier_name,
+        store_name: item.store_name
+      }))
+    });
     
     priceService.saveUpdatedFile(state.storeFile!, selectedItems.map(item => ({
       article: item.article,
@@ -121,11 +136,14 @@ const UpdatePricePage: React.FC = () => {
       store_name: item.store_name
     })))
       .then(response => {
+        console.log('Успешный ответ от сервера:', response);
         setUpdatedFile(response);
         setUpdateCompleted(true);
         setIsUpdating(false);
+        setActiveStep(prevStep => prevStep + 1); // Переходим к следующему шагу
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('Ошибка при обновлении цен:', error);
         setErrorOccurred(true);
         setIsUpdating(false);
       });
