@@ -5,8 +5,7 @@ import {
   Typography, 
   Button, 
   Box, 
-  Container,
-  useTheme
+  Container
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
