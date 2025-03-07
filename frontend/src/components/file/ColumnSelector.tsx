@@ -16,7 +16,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Chip,
   Alert,
   Tooltip,
   IconButton

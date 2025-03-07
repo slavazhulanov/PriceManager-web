@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { FileInfo, FileType, ColumnMapping, PriceUpdate, ComparisonResult } from '../types';
+import { FileInfo, FileType, PriceUpdate, ComparisonResult } from '../types';
 
 // Определение базового URL API в зависимости от окружения
 const getApiUrl = () => {

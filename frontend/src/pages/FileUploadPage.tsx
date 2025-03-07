@@ -11,7 +11,6 @@ import {
   Grid, 
   Divider,
   Alert,
-  StepContent,
   Card,
   CardContent
 } from '@mui/material';
@@ -22,7 +21,6 @@ import { useNavigate } from 'react-router-dom';
 import FileDropzone from '../components/file/FileDropzone';
 import ColumnSelector from '../components/file/ColumnSelector';
 import { FileInfo, FileType, ColumnMapping } from '../types';
-import { fileService } from '../services/api';
 
 // Шаги загрузки файлов
 const steps = [

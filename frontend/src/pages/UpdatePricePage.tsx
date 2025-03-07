@@ -13,7 +13,6 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Checkbox,
   Chip,
   Card,
   CardContent,
@@ -27,7 +26,7 @@ import {
   Step,
   StepLabel,
   StepContent,
-  Link
+  IconButton
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MatchedItem, FileInfo, PriceUpdate } from '../types';
@@ -67,6 +66,12 @@ const UpdatePricePage: React.FC = () => {
   // Добавляем состояние для обновленного файла
   const [updatedFile, setUpdatedFile] = useState<UpdatedFileInfo | null>(null);
   
+  // Состояние для отслеживания статуса обновления
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [updateCompleted, setUpdateCompleted] = useState(false);
+  const [errorOccurred, setErrorOccurred] = useState(false);
+  const [openDialog, setOpenDialog] = useState(false);
+  
   // Шаги процесса обновления цен
   const steps = [
     {
@@ -105,64 +110,25 @@ const UpdatePricePage: React.FC = () => {
   
   // Обработчик подтверждения обновления цен
   const handleConfirmUpdate = () => {
-    setConfirmDialogOpen(false);
-    setLoading(true);
-    setError(null);
+    setIsUpdating(true);
+    setUpdateCompleted(false);
     
-    // Преобразуем выбранные товары в формат для обновления
-    const updates: PriceUpdate[] = selectedItems.map(item => ({
+    priceService.saveUpdatedFile(state.storeFile!, selectedItems.map(item => ({
       article: item.article,
       old_price: item.store_price,
       new_price: item.supplier_price,
       supplier_name: item.supplier_name,
       store_name: item.store_name
-    }));
-    
-    // В реальном приложении вызываем API
-    if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-      priceService.updatePrices(updates, state.storeFile)
-        .then(updatedItems => {
-          console.log('Цены успешно обновлены, сохраняем файл...');
-          return priceService.saveUpdatedFile(state.storeFile, updatedItems);
-        })
-        .then(fileInfo => {
-          console.log('Файл успешно сохранен:', fileInfo);
-          setUpdatedFile(fileInfo);
-          setLoading(false);
-          setSuccess(true);
-          setActiveStep(3);
-        })
-        .catch(err => {
-          console.error('Ошибка при обновлении цен:', err);
-          setError('Ошибка при обновлении цен: ' + (err.message || 'Неизвестная ошибка'));
-          setLoading(false);
-        });
-    } else {
-      // Для примера используем таймаут и моковые данные
-      setTimeout(() => {
-        // Сохраняем расширение файла из оригинального файла
-        const originalExtension = state.storeFile.original_filename.split('.').pop() || 'xlsx';
-        
-        // Моковые данные о скачиваемом файле
-        const mockFileInfo: UpdatedFileInfo = {
-          filename: `updated_store_prices.${originalExtension}`,
-          download_url: `/uploads/updated_store_prices.${originalExtension}`,
-          count: selectedItems.length,
-          // Сохраняем метаданные исходного файла для корректного форматирования
-          // original_format: {
-          //   encoding: state.storeFile.encoding,
-          //   separator: state.storeFile.separator,
-          //   file_type: state.storeFile.file_type
-          // }
-        };
-        
-        console.log('Моковые данные о скачиваемом файле:', mockFileInfo);
-        setUpdatedFile(mockFileInfo);
-        setLoading(false);
-        setSuccess(true);
-        setActiveStep(3); // Переход к финальному шагу
-      }, 2000);
-    }
+    })))
+      .then(response => {
+        setUpdatedFile(response);
+        setUpdateCompleted(true);
+        setIsUpdating(false);
+      })
+      .catch(() => {
+        setErrorOccurred(true);
+        setIsUpdating(false);
+      });
   };
   
   // Обработчик отмены обновления цен

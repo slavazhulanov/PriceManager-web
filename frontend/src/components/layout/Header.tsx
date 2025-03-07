@@ -12,8 +12,6 @@ import { Link as RouterLink } from 'react-router-dom';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 
 const Header: React.FC = () => {
-  const theme = useTheme();
-  
   return (
     <AppBar position="static">
       <Container maxWidth="lg">
