@@ -1,4 +1,4 @@
-def application(environ, start_response):
+def app(environ, start_response):
     """WSGI-совместимое приложение для Vercel."""
     
     # Получаем путь из запроса
@@ -29,4 +29,7 @@ def application(environ, start_response):
     
     # Отправляем ответ
     start_response(status, headers)
-    return [response_body.encode()] 
+    return [response_body.encode()]
+
+# Также определяем переменную handler для поддержки обоих вариантов
+handler = app 
