@@ -15,15 +15,7 @@
   ],
   "routes": [
     {
-      "src": "/api/v1/(.*)",
-      "dest": "backend/vercel_handler.py"
-    },
-    {
-      "src": "/api/(.*)",
-      "dest": "backend/vercel_handler.py"
-    },
-    {
-      "src": "/uploads/(.*)",
+      "src": "/api(.*)",
       "dest": "backend/vercel_handler.py"
     },
     {
