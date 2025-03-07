@@ -1,35 +1,32 @@
-def app(environ, start_response):
-    """WSGI-совместимое приложение для Vercel."""
-    
-    # Получаем путь из запроса
-    path = environ.get('PATH_INFO', '')
-    
-    # Определяем ответы для разных маршрутов
-    if path == '/':
-        status = '200 OK'
-        headers = [
-            ('Content-type', 'application/json'),
-        ]
-        response_body = '{"message": "PriceManager API работает"}'
-    elif path.startswith('/api/v1'):
-        status = '200 OK'
-        headers = [
-            ('Content-type', 'application/json'),
-            ('Access-Control-Allow-Origin', '*'),
-            ('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS'),
-            ('Access-Control-Allow-Headers', 'Content-Type'),
-        ]
-        response_body = '{"message": "PriceManager API v1"}'
-    else:
-        status = '404 Not Found'
-        headers = [
-            ('Content-type', 'application/json'),
-        ]
-        response_body = '{"error": "Not found"}'
-    
-    # Отправляем ответ
-    start_response(status, headers)
-    return [response_body.encode()]
+from http.server import BaseHTTPRequestHandler
 
-# Также определяем переменную handler для поддержки обоих вариантов
-handler = app 
+class handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        """Обработка GET запросов"""
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write('{"message": "PriceManager API работает"}'.encode())
+        elif self.path.startswith('/api/v1'):
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+            self.wfile.write('{"message": "PriceManager API v1"}'.encode())
+        else:
+            self.send_response(404)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write('{"error": "Not found"}'.encode())
+    
+    def do_OPTIONS(self):
+        """Обработка OPTIONS запросов для CORS"""
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+        self.wfile.write(''.encode()) 
