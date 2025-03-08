@@ -7,6 +7,7 @@ import io
 from supabase import create_client
 import time
 import traceback
+import cgi
 
 # Настройка логирования
 logging.basicConfig(
@@ -295,22 +296,68 @@ class handler(BaseHTTPRequestHandler):
                     if 'multipart/form-data' in content_type:
                         logger.info("Получен запрос на загрузку файла (multipart/form-data)")
                         
-                        # В реальном приложении здесь должен быть код для обработки multipart/form-data и сохранения файла
+                        # Обработка multipart/form-data
+                        # Для анализа multipart/form-data используем cgi.FieldStorage
+                        environ = {'REQUEST_METHOD': 'POST',
+                                'CONTENT_TYPE': self.headers['Content-Type'],
+                                'CONTENT_LENGTH': self.headers['Content-Length']}
                         
-                        filename = "mock_file.csv"  # В реальном приложении извлекается из запроса
-                        file_type = "store"         # В реальном приложении извлекается из запроса
+                        # Создаем FieldStorage объект
+                        form = cgi.FieldStorage(
+                            fp=self.rfile,
+                            headers=self.headers,
+                            environ=environ
+                        )
                         
-                        # Генерируем уникальное имя для сохраненного файла
-                        stored_filename = f"mock_{int(time.time())}_{filename}"
+                        # Получаем файл и тип файла из запроса
+                        file_item = form['file'] if 'file' in form else None
+                        file_type = form['file_type'].value if 'file_type' in form else "unknown"
+                        
+                        if not file_item:
+                            raise ValueError("Файл не найден в запросе")
+                            
+                        # Получаем имя и содержимое файла
+                        original_filename = file_item.filename
+                        file_content = file_item.file.read()
+                        
+                        # Генерируем уникальное имя для сохраненного файла без префикса "mock_"
+                        timestamp = int(time.time())
+                        file_ext = os.path.splitext(original_filename)[1]
+                        stored_filename = f"upload_{timestamp}_{file_type}{file_ext}"
+                        
+                        logger.info(f"Загружен файл: {original_filename}, тип: {file_type}, размер: {len(file_content)} байт")
+                        
+                        # Загружаем файл в Supabase
+                        supabase = get_supabase_client()
+                        if supabase:
+                            try:
+                                bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
+                                folder = os.environ.get("SUPABASE_FOLDER", "uploads")
+                                file_path = f"{folder}/{stored_filename}" if folder else stored_filename
+                                
+                                # Загружаем файл в Supabase
+                                logger.info(f"Загрузка файла в Supabase: бакет={bucket_name}, путь={file_path}")
+                                supabase.storage.from_(bucket_name).upload(file_path, file_content)
+                                logger.info(f"Файл успешно загружен в Supabase: {file_path}")
+                                
+                                # Сохраняем файл в кеше для быстрого доступа
+                                get_file_content.file_cache[stored_filename] = file_content
+                            except Exception as upload_error:
+                                logger.error(f"Ошибка при загрузке файла в Supabase: {str(upload_error)}")
+                                # Продолжаем выполнение и возвращаем информацию о файле, даже если не удалось загрузить в Supabase
+                        
+                        # Определение кодировки и разделителя
+                        encoding = "utf-8"  # По умолчанию
+                        separator = ","     # По умолчанию
                         
                         # Формируем ответ
                         file_info = {
-                            "id": f"mock-id-{int(time.time())}",
-                            "original_filename": filename,
+                            "id": f"file-id-{timestamp}",
+                            "original_filename": original_filename,
                             "stored_filename": stored_filename,
                             "file_type": file_type,
-                            "encoding": "utf-8",
-                            "separator": ","
+                            "encoding": encoding,
+                            "separator": separator
                         }
                         
                         # Отправляем успешный ответ
