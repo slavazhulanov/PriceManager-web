@@ -41,29 +41,13 @@ def get_file_content(stored_filename):
             logger.info(f"Файл {stored_filename} найден в кеше, возвращаем из кеша")
             return get_file_content.file_cache[stored_filename]
         
-        # В Vercel для мок-файлов генерируем тестовые данные без обращения к Supabase
-        # Временно отключено для тестирования на реальных данных
-        # if "mock_" in stored_filename:
-        #     logger.info(f"Генерация тестовых данных для мок-файла: {stored_filename}")
-        #     
-        #     # Генерируем разные данные в зависимости от назначения файла
-        #     if "_supplier" in stored_filename or any(stored_filename.endswith(x) for x in ["1_mock_file.csv", "3_mock_file.csv", "5_mock_file.csv", "7_mock_file.csv", "9_mock_file.csv"]):
-        #         # Данные поставщика
-        #         test_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
-        #     else:
-        #         # Данные магазина
-        #         test_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
-        #             
-        #     # Сохраняем в кеш для последующих запросов
-        #     get_file_content.file_cache[stored_filename] = test_content
-        #     logger.info(f"Сгенерированы тестовые данные для мок-файла: {stored_filename}, размер: {len(test_content)} байт")
-        #     return test_content
-        
-        # Для реальных файлов обращаемся к Supabase
-        # Настройка клиента Supabase
+        # Для всех файлов сначала пытаемся получить их из Supabase
         supabase = get_supabase_client()
         if not supabase:
             logger.error("Не удалось инициализировать Supabase клиент")
+            # Если это мок-файл, вернем тестовые данные
+            if "mock_" in stored_filename:
+                return generate_mock_data(stored_filename)
             return None
         
         bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
@@ -94,32 +78,26 @@ def get_file_content(stored_filename):
                 try:
                     import httpx
                     
-                    public_url = supabase.storage.from_(bucket_name).get_public_url(file_path)
+                    public_url = f"{os.environ.get('SUPABASE_URL')}/storage/v1/object/public/{bucket_name}/{file_path}"
                     logger.info(f"Попытка получения через публичный URL: {public_url}")
                     
-                    with httpx.Client(timeout=3.0) as client:
+                    with httpx.Client(timeout=3.0) as client:  # жесткий таймаут 3 секунды
                         response = client.get(public_url)
-                        if response.status_code == 200:
-                            content = response.content
-                            elapsed_total = time.time() - start_time
-                            logger.info(f"Файл получен через URL за {elapsed_total:.2f}с: {stored_filename}, размер: {len(content)} байт")
-                            
-                            # Сохраняем в кеш
-                            get_file_content.file_cache[stored_filename] = content
-                            return content
-                        else:
-                            logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
+                        
+                    if response.status_code == 200:
+                        file_content = response.content
+                        get_file_content.file_cache[stored_filename] = file_content
+                        logger.info(f"Файл получен через публичный URL: {stored_filename}, размер: {len(file_content)} байт")
+                        return file_content
+                    else:
+                        logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
                 except Exception as url_error:
-                    logger.error(f"Ошибка при получении через публичный URL: {str(url_error)}")
-            else:
-                logger.warning(f"Пропуск запроса по публичному URL (прошло {elapsed:.2f}с)")
+                    logger.error(f"Ошибка при запросе публичного URL: {str(url_error)}")
             
-            # Если это тестовый файл test.csv, создаём его локально
-            if stored_filename == "test.csv":
-                test_content = "column1,column2,column3\nvalue1,value2,value3\n".encode('utf-8')
-                get_file_content.file_cache[stored_filename] = test_content
-                logger.info(f"Сгенерированы тестовые данные для test.csv, размер: {len(test_content)} байт")
-                return test_content
+            # Если это мок-файл и не удалось получить из Supabase, генерируем тестовые данные
+            if "mock_" in stored_filename:
+                logger.info(f"Файл не найден в Supabase, генерируем тестовые данные для {stored_filename}")
+                return generate_mock_data(stored_filename)
                 
             return None
     except Exception as e:
@@ -554,4 +532,21 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        self.wfile.write(''.encode()) 
+        self.wfile.write(''.encode())
+
+# Вспомогательная функция для генерации тестовых данных
+def generate_mock_data(stored_filename):
+    logger.info(f"Генерация тестовых данных для мок-файла: {stored_filename}")
+    
+    # Генерируем разные данные в зависимости от назначения файла
+    if "_supplier" in stored_filename or any(stored_filename.endswith(x) for x in ["1_mock_file.csv", "3_mock_file.csv", "5_mock_file.csv", "7_mock_file.csv", "9_mock_file.csv"]):
+        # Данные поставщика
+        test_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
+    else:
+        # Данные магазина
+        test_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
+        
+    # Сохраняем в кеш для последующих запросов
+    get_file_content.file_cache[stored_filename] = test_content
+    logger.info(f"Сгенерированы тестовые данные для мок-файла: {stored_filename}, размер: {len(test_content)} байт")
+    return test_content 
