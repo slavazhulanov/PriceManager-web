@@ -16,36 +16,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger("vercel_handler")
 
-# Инициализация Supabase
+# Функция для получения Supabase клиента
 def get_supabase_client():
+    """
+    Инициализация клиента Supabase
+    """
+    from supabase import create_client
+    
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_KEY")
+    
+    logger.info(f"Инициализация Supabase клиента: URL={supabase_url[:20]}..., KEY={supabase_key[:10]}...")
+    
     if not supabase_url or not supabase_key:
-        logger.error("Отсутствуют переменные окружения SUPABASE_URL или SUPABASE_KEY")
+        logger.error(f"Отсутствуют переменные окружения SUPABASE_URL или SUPABASE_KEY")
         return None
     try:
-        return create_client(supabase_url, supabase_key)
+        client = create_client(supabase_url, supabase_key)
+        logger.info(f"Supabase клиент успешно инициализирован")
+        return client
     except Exception as e:
         logger.error(f"Не удалось инициализировать Supabase клиент: {str(e)}")
+        logger.error(f"Трассировка: {traceback.format_exc()}")
         return None
 
 # Функция для получения содержимого файла из Supabase
 def get_file_content(stored_filename):
+    """
+    Получение содержимого файла из Supabase Storage с подробным логированием
+    """
     try:
+        logger.info(f"[GET_FILE] Запрос файла: {stored_filename}")
+        
         # Кеширование файлов в памяти для быстрого доступа (продержится только на время обработки запроса)
         global file_cache
         if not hasattr(get_file_content, 'file_cache'):
             get_file_content.file_cache = {}
+            logger.info(f"[GET_FILE] Инициализирован кеш файлов")
         
         # Проверяем кеш
         if stored_filename in get_file_content.file_cache:
-            logger.info(f"Файл {stored_filename} найден в кеше, возвращаем из кеша")
+            cache_size = len(get_file_content.file_cache[stored_filename])
+            logger.info(f"[GET_FILE] Файл найден в кеше: {stored_filename}, размер: {cache_size} байт")
             return get_file_content.file_cache[stored_filename]
         
         # Работаем ТОЛЬКО с реальными файлами из Supabase - никаких тестовых данных!
+        logger.info(f"[GET_FILE] Файл не найден в кеше, обращаемся к Supabase")
         supabase = get_supabase_client()
         if not supabase:
-            logger.error("Не удалось инициализировать Supabase клиент")
+            logger.error(f"[GET_FILE] Не удалось инициализировать Supabase клиент для файла {stored_filename}")
             return None
         
         bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
@@ -53,23 +72,26 @@ def get_file_content(stored_filename):
         
         # Получаем файл из Supabase Storage
         file_path = f"{folder}/{stored_filename}" if folder else stored_filename
-        logger.info(f"Запрос файла из Supabase: бакет={bucket_name}, путь={file_path}")
+        logger.info(f"[GET_FILE] Запрос файла из Supabase: бакет={bucket_name}, путь={file_path}")
         
         # Устанавливаем короткий таймаут, чтобы вписаться в лимит Vercel 10 секунд
         start_time = time.time()
         
         try:
+            logger.info(f"[GET_FILE] Начало загрузки файла из Supabase: {file_path}")
             response = supabase.storage.from_(bucket_name).download(file_path)
             
             elapsed = time.time() - start_time
-            logger.info(f"Файл получен за {elapsed:.2f}с: {stored_filename}, размер: {len(response)} байт")
+            logger.info(f"[GET_FILE] Файл получен за {elapsed:.2f}с: {stored_filename}, размер: {len(response)} байт")
             
             # Сохраняем в кеш
             get_file_content.file_cache[stored_filename] = response
+            logger.info(f"[GET_FILE] Файл сохранен в кеше: {stored_filename}")
             return response
         except Exception as download_error:
             elapsed = time.time() - start_time
-            logger.error(f"Ошибка при загрузке файла через API ({elapsed:.2f}с): {str(download_error)}")
+            logger.error(f"[GET_FILE] Ошибка при загрузке файла через API ({elapsed:.2f}с): {str(download_error)}")
+            logger.error(f"[GET_FILE] Трассировка: {traceback.format_exc()}")
             
             # Пробуем альтернативный способ через публичный URL, если осталось достаточно времени
             if elapsed < 3.0:  # Если прошло меньше 3 секунд, пробуем публичный URL
@@ -77,28 +99,35 @@ def get_file_content(stored_filename):
                     import httpx
                     
                     public_url = f"{os.environ.get('SUPABASE_URL')}/storage/v1/object/public/{bucket_name}/{file_path}"
-                    logger.info(f"Попытка получения через публичный URL: {public_url}")
+                    logger.info(f"[GET_FILE] Попытка получения через публичный URL: {public_url}")
                     
                     with httpx.Client(timeout=3.0) as client:  # жесткий таймаут 3 секунды
+                        logger.info(f"[GET_FILE] Отправка HTTP запроса: GET {public_url}")
                         response = client.get(public_url)
                         
+                    logger.info(f"[GET_FILE] Ответ от сервера: статус={response.status_code}")
+                    
                     if response.status_code == 200:
                         file_content = response.content
                         get_file_content.file_cache[stored_filename] = file_content
-                        logger.info(f"Файл получен через публичный URL: {stored_filename}, размер: {len(file_content)} байт")
+                        file_size = len(file_content)
+                        total_elapsed = time.time() - start_time
+                        logger.info(f"[GET_FILE] Файл получен через публичный URL за {total_elapsed:.2f}с: {stored_filename}, размер: {file_size} байт")
                         return file_content
                     else:
-                        logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
+                        logger.error(f"[GET_FILE] Ошибка при запросе публичного URL: {response.status_code}")
+                        logger.error(f"[GET_FILE] Тело ответа: {response.text[:200]}...")
                 except Exception as url_error:
-                    logger.error(f"Ошибка при запросе публичного URL: {str(url_error)}")
+                    logger.error(f"[GET_FILE] Ошибка при запросе публичного URL: {str(url_error)}")
+                    logger.error(f"[GET_FILE] Трассировка: {traceback.format_exc()}")
             
             # Файл не найден - никаких резервных тестовых данных!
-            logger.error(f"Файл {stored_filename} не найден в Supabase")
+            logger.error(f"[GET_FILE] ИТОГ: Файл {stored_filename} не найден в Supabase. Все попытки загрузки не удались.")
             return None
             
     except Exception as e:
-        logger.error(f"Ошибка при получении файла: {str(e)}")
-        traceback.print_exc()
+        logger.error(f"[GET_FILE] Критическая ошибка при получении файла: {str(e)}")
+        logger.error(f"[GET_FILE] Полная трассировка:\n{traceback.format_exc()}")
         return None
 
 # Функция для чтения и анализа файла
@@ -116,30 +145,69 @@ def read_file(file_content, extension, encoding, separator):
 
 # Функция для сравнения файлов
 def compare_files(supplier_file_info, store_file_info):
+    """
+    Сравнение файлов с подробным логированием
+    """
+    logger.info("[COMPARE_FILES] Начало сравнения файлов")
+    start_time = time.time()
+    
     try:
         # Получаем файлы из Supabase
+        logger.info(f"[COMPARE_FILES] Запрос файла поставщика: {supplier_file_info.get('stored_filename')}")
         supplier_content = get_file_content(supplier_file_info['stored_filename'])
+        
+        if not supplier_content:
+            error_msg = f"Не удалось получить файл поставщика из хранилища: {supplier_file_info.get('stored_filename')}"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        logger.info(f"[COMPARE_FILES] Запрос файла магазина: {store_file_info.get('stored_filename')}")
         store_content = get_file_content(store_file_info['stored_filename'])
         
-        if not supplier_content or not store_content:
-            return {"error": "Не удалось получить файлы из хранилища"}
+        if not store_content or not supplier_content:
+            error_msg = "Не удалось получить файлы из хранилища"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        logger.info(f"[COMPARE_FILES] Оба файла успешно получены")
+        logger.info(f"[COMPARE_FILES] Размер файла поставщика: {len(supplier_content)} байт")
+        logger.info(f"[COMPARE_FILES] Размер файла магазина: {len(store_content)} байт")
         
         # Получаем информацию о колонках
         supplier_mapping = supplier_file_info.get('column_mapping', {})
         store_mapping = store_file_info.get('column_mapping', {})
         
         if not supplier_mapping or not store_mapping:
-            return {"error": "Отсутствует маппинг колонок"}
+            error_msg = "Отсутствует маппинг колонок"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        # Логируем информацию о маппинге
+        logger.info(f"[COMPARE_FILES] Маппинг колонок поставщика: {supplier_mapping}")
+        logger.info(f"[COMPARE_FILES] Маппинг колонок магазина: {store_mapping}")
         
         # Читаем файлы
         supplier_ext = os.path.splitext(supplier_file_info['original_filename'])[1].lower()
         store_ext = os.path.splitext(store_file_info['original_filename'])[1].lower()
         
+        logger.info(f"[COMPARE_FILES] Расширение файла поставщика: {supplier_ext}")
+        logger.info(f"[COMPARE_FILES] Расширение файла магазина: {store_ext}")
+        
+        logger.info(f"[COMPARE_FILES] Чтение файла поставщика...")
         supplier_df = read_file(supplier_content, supplier_ext, supplier_file_info.get('encoding', 'utf-8'), supplier_file_info.get('separator', ','))
+        
+        logger.info(f"[COMPARE_FILES] Чтение файла магазина...")
         store_df = read_file(store_content, store_ext, store_file_info.get('encoding', 'utf-8'), store_file_info.get('separator', ','))
         
         if supplier_df is None or store_df is None:
-            return {"error": "Ошибка при чтении файлов"}
+            error_msg = "Ошибка при чтении файлов"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        logger.info(f"[COMPARE_FILES] Файл поставщика успешно прочитан, строк: {len(supplier_df)}")
+        logger.info(f"[COMPARE_FILES] Файл магазина успешно прочитан, строк: {len(store_df)}")
+        logger.info(f"[COMPARE_FILES] Колонки файла поставщика: {', '.join(supplier_df.columns.tolist())}")
+        logger.info(f"[COMPARE_FILES] Колонки файла магазина: {', '.join(store_df.columns.tolist())}")
         
         # Колонки для сравнения
         supplier_article_col = supplier_mapping.get('article_column')
@@ -150,66 +218,150 @@ def compare_files(supplier_file_info, store_file_info):
         store_price_col = store_mapping.get('price_column')
         store_name_col = store_mapping.get('name_column')
         
+        logger.info(f"[COMPARE_FILES] Колонки для сравнения:")
+        logger.info(f"[COMPARE_FILES] Поставщик: артикул='{supplier_article_col}', цена='{supplier_price_col}', наименование='{supplier_name_col}'")
+        logger.info(f"[COMPARE_FILES] Магазин: артикул='{store_article_col}', цена='{store_price_col}', наименование='{store_name_col}'")
+        
+        # Проверяем наличие необходимых колонок
+        if supplier_article_col not in supplier_df.columns:
+            error_msg = f"Колонка '{supplier_article_col}' отсутствует в файле поставщика"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        if supplier_price_col not in supplier_df.columns:
+            error_msg = f"Колонка '{supplier_price_col}' отсутствует в файле поставщика"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        if store_article_col not in store_df.columns:
+            error_msg = f"Колонка '{store_article_col}' отсутствует в файле магазина"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
+        if store_price_col not in store_df.columns:
+            error_msg = f"Колонка '{store_price_col}' отсутствует в файле магазина"
+            logger.error(f"[COMPARE_FILES] {error_msg}")
+            return {"error": error_msg}
+        
         # Создаем структуры для результатов
         matches = []
         missing_in_store = []
         missing_in_supplier = []
         
         # Преобразуем артикулы в строки для сравнения
+        logger.info(f"[COMPARE_FILES] Преобразование артикулов в строки для сравнения")
         supplier_df[supplier_article_col] = supplier_df[supplier_article_col].astype(str)
         store_df[store_article_col] = store_df[store_article_col].astype(str)
         
         # Создаем словари для быстрого поиска
+        logger.info(f"[COMPARE_FILES] Создание словарей для быстрого поиска")
         supplier_dict = dict(zip(supplier_df[supplier_article_col], supplier_df[supplier_price_col]))
         store_dict = dict(zip(store_df[store_article_col], store_df[store_price_col]))
         
         # Сравнение цен
+        logger.info(f"[COMPARE_FILES] Начало сравнения цен")
         for article, supplier_price in supplier_dict.items():
             if article in store_dict:
                 store_price = store_dict[article]
-                price_diff = float(store_price) - float(supplier_price)
-                price_diff_percent = (price_diff / float(supplier_price)) * 100 if float(supplier_price) > 0 else 0
                 
-                # Получаем названия товаров если они есть
-                supplier_name = supplier_df.loc[supplier_df[supplier_article_col] == article, supplier_name_col].iloc[0] if supplier_name_col else None
-                store_name = store_df.loc[store_df[store_article_col] == article, store_name_col].iloc[0] if store_name_col else None
+                # Получаем наименования, если доступны
+                supplier_name = None
+                if supplier_name_col and supplier_name_col in supplier_df.columns:
+                    supplier_row = supplier_df[supplier_df[supplier_article_col] == article]
+                    if not supplier_row.empty:
+                        supplier_name = supplier_row.iloc[0][supplier_name_col]
                 
-                matches.append({
-                    "article": article,
-                    "supplier_price": float(supplier_price),
-                    "store_price": float(store_price),
-                    "price_diff": float(price_diff),
-                    "price_diff_percent": float(price_diff_percent),
-                    "supplier_name": str(supplier_name) if supplier_name_col else None,
-                    "store_name": str(store_name) if store_name_col else None
-                })
+                store_name = None
+                if store_name_col and store_name_col in store_df.columns:
+                    store_row = store_df[store_df[store_article_col] == article]
+                    if not store_row.empty:
+                        store_name = store_row.iloc[0][store_name_col]
+                
+                # Преобразуем цены в числа
+                try:
+                    supplier_price_float = float(supplier_price)
+                    store_price_float = float(store_price)
+                    
+                    # Вычисляем разницу в цене
+                    price_diff = supplier_price_float - store_price_float
+                    price_diff_percent = 0
+                    
+                    # Вычисление процентной разницы
+                    if store_price_float != 0:
+                        price_diff_percent = (price_diff / store_price_float) * 100
+                    
+                    # Добавляем в список совпадений
+                    matches.append({
+                        "article": article,
+                        "supplier_price": supplier_price_float,
+                        "store_price": store_price_float,
+                        "price_diff": price_diff,
+                        "price_diff_percent": price_diff_percent,
+                        "supplier_name": supplier_name,
+                        "store_name": store_name
+                    })
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[COMPARE_FILES] Ошибка преобразования цены для артикула {article}: {str(e)}")
+                    logger.warning(f"[COMPARE_FILES] Поставщик: '{supplier_price}', Магазин: '{store_price}'")
             else:
-                # Товар есть у поставщика, но нет в магазине
-                supplier_name = supplier_df.loc[supplier_df[supplier_article_col] == article, supplier_name_col].iloc[0] if supplier_name_col else None
-                missing_in_store.append({
-                    "article": article,
-                    "supplier_price": float(supplier_price),
-                    "supplier_name": str(supplier_name) if supplier_name_col else None
-                })
+                # Товар отсутствует в магазине
+                try:
+                    supplier_name = None
+                    if supplier_name_col and supplier_name_col in supplier_df.columns:
+                        supplier_row = supplier_df[supplier_df[supplier_article_col] == article]
+                        if not supplier_row.empty:
+                            supplier_name = supplier_row.iloc[0][supplier_name_col]
+                    
+                    missing_in_store.append({
+                        "article": article,
+                        "supplier_price": float(supplier_price),
+                        "supplier_name": supplier_name
+                    })
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[COMPARE_FILES] Ошибка для отсутствующего товара с артикулом {article}: {str(e)}")
         
-        # Товары, которые есть в магазине, но нет у поставщика
+        # Находим товары, отсутствующие у поставщика
+        logger.info(f"[COMPARE_FILES] Поиск товаров, отсутствующих у поставщика")
         for article, store_price in store_dict.items():
             if article not in supplier_dict:
-                store_name = store_df.loc[store_df[store_article_col] == article, store_name_col].iloc[0] if store_name_col else None
-                missing_in_supplier.append({
-                    "article": article,
-                    "store_price": float(store_price),
-                    "store_name": str(store_name) if store_name_col else None
-                })
+                try:
+                    store_name = None
+                    if store_name_col and store_name_col in store_df.columns:
+                        store_row = store_df[store_df[store_article_col] == article]
+                        if not store_row.empty:
+                            store_name = store_row.iloc[0][store_name_col]
+                    
+                    missing_in_supplier.append({
+                        "article": article,
+                        "store_price": float(store_price),
+                        "store_name": store_name
+                    })
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[COMPARE_FILES] Ошибка для товара отсутствующего у поставщика с артикулом {article}: {str(e)}")
         
-        return {
+        # Формируем результаты
+        comparison_results = {
             "matches": matches,
             "missing_in_store": missing_in_store,
-            "missing_in_supplier": missing_in_supplier
+            "missing_in_supplier": missing_in_supplier,
+            "supplier_file": supplier_file_info,
+            "store_file": store_file_info
         }
+        
+        # Логируем итоги
+        total_time = time.time() - start_time
+        logger.info(f"[COMPARE_FILES] Сравнение файлов завершено за {total_time:.2f}с")
+        logger.info(f"[COMPARE_FILES] Итоги сравнения: найдено совпадений: {len(matches)}, " +
+                  f"отсутствуют в магазине: {len(missing_in_store)}, " +
+                  f"отсутствуют у поставщика: {len(missing_in_supplier)}")
+        
+        return comparison_results
+    
     except Exception as e:
-        logger.error(f"Ошибка при сравнении файлов: {str(e)}")
-        return {"error": f"Ошибка при сравнении файлов: {str(e)}"}
+        error_msg = f"Ошибка при сравнении файлов: {str(e)}"
+        logger.error(f"[COMPARE_FILES] {error_msg}")
+        logger.error(f"[COMPARE_FILES] Полная трассировка:\n{traceback.format_exc()}")
+        return {"error": error_msg}
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -295,13 +447,18 @@ class handler(BaseHTTPRequestHandler):
             # Обработчик загрузки файлов
             if self.path == '/api/v1/files/upload' or self.path == '/files/upload':
                 try:
+                    logger.info("[UPLOAD] Получен запрос на загрузку файла")
+                    logger.info(f"[UPLOAD] Content-Type: {self.headers.get('Content-Type', 'не указан')}")
+                    logger.info(f"[UPLOAD] Content-Length: {self.headers.get('Content-Length', 'не указан')}")
+                    
                     # Проверяем, является ли контент многофайловым
                     content_type = self.headers.get('Content-Type', '')
                     if 'multipart/form-data' in content_type:
-                        logger.info("Получен запрос на загрузку файла (multipart/form-data)")
+                        logger.info("[UPLOAD] Тип контента: multipart/form-data")
                         
                         # ВАЖНО: Работаем максимально быстро, чтобы уложиться в 10 секунд Vercel
                         # Не загружаем файл в Supabase, а только создаем метаданные
+                        start_time = time.time()
                         
                         # Обработка multipart/form-data - сверхбыстрая версия
                         import cgi
@@ -312,46 +469,64 @@ class handler(BaseHTTPRequestHandler):
                         
                         # Получаем только тип файла и имя, не читая все содержимое
                         try:
+                            logger.info("[UPLOAD] Начало обработки формы с файлом")
                             # Используем минимальные значения буфера для ускорения
                             environ = {'REQUEST_METHOD': 'POST',
                                     'CONTENT_TYPE': self.headers['Content-Type'],
                                     'CONTENT_LENGTH': self.headers['Content-Length']}
                             
                             # Создаем FieldStorage с ограничениями
+                            logger.info("[UPLOAD] Создание объекта FieldStorage")
                             form = cgi.FieldStorage(
                                 fp=self.rfile,
                                 headers=self.headers,
                                 environ=environ
                             )
+                            logger.info(f"[UPLOAD] FieldStorage создан, доступные поля: {list(form.keys())}")
                             
                             # Быстрый чек поля file_type, которое маленькое
                             if 'file_type' in form:
                                 file_type = form['file_type'].value
+                                logger.info(f"[UPLOAD] Получен тип файла: {file_type}")
+                            else:
+                                logger.warning("[UPLOAD] Поле file_type не найдено в форме")
                             
                             # Получаем только имя файла, не читая содержимое
                             if 'file' in form:
                                 fileitem = form['file']
-                                if fileitem.filename:
+                                if hasattr(fileitem, 'filename') and fileitem.filename:
                                     original_filename = fileitem.filename
+                                    logger.info(f"[UPLOAD] Получено имя файла: {original_filename}")
+                                else:
+                                    logger.warning("[UPLOAD] У элемента 'file' нет атрибута filename")
                                     
-                                # Не читаем содержимое файла
-                                logger.info(f"Обрабатываем файл: {original_filename}, тип: {file_type}")
+                                # Не читаем содержимое файла полностью
+                                is_file = hasattr(fileitem, 'file')
+                                logger.info(f"[UPLOAD] Элемент 'file' имеет атрибут 'file': {is_file}")
+                            else:
+                                logger.warning("[UPLOAD] Поле file не найдено в форме")
+                            
+                            form_processing_time = time.time() - start_time
+                            logger.info(f"[UPLOAD] Обработка формы завершена за {form_processing_time:.2f}с")
                             
                         except Exception as form_error:
-                            logger.error(f"Ошибка при обработке формы: {str(form_error)}")
+                            logger.error(f"[UPLOAD] Ошибка при обработке формы: {str(form_error)}")
+                            logger.error(f"[UPLOAD] Трассировка:\n{traceback.format_exc()}")
                                 
                         # Генерируем уникальное имя файла
                         timestamp = int(time.time())
                         file_ext = os.path.splitext(original_filename)[1] or ".csv"
                         stored_filename = f"upload_{timestamp}_{file_type}{file_ext}"
                         
-                        logger.info(f"Подготовка информации о файле: {original_filename} -> {stored_filename}")
+                        logger.info(f"[UPLOAD] Сгенерировано имя файла: {original_filename} -> {stored_filename}")
                         
                         # Генерируем URL для загрузки файла напрямую в Supabase
                         supabase_url = os.environ.get('SUPABASE_URL', '')
                         supabase_key = os.environ.get('SUPABASE_KEY', '')
                         bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
                         folder = os.environ.get("SUPABASE_FOLDER", "uploads")
+                        
+                        logger.info(f"[UPLOAD] Параметры Supabase: URL={supabase_url[:20]}..., бакет={bucket_name}, папка={folder}")
                         
                         # Формируем информацию о файле
                         file_info = {
@@ -368,6 +543,9 @@ class handler(BaseHTTPRequestHandler):
                             "supabase_folder": folder
                         }
                         
+                        total_time = time.time() - start_time
+                        logger.info(f"[UPLOAD] Подготовка ответа завершена за {total_time:.2f}с")
+                        
                         # Отправляем быстрый успешный ответ без долгой обработки
                         self.send_response(200)
                         self.send_header('Content-type', 'application/json')
@@ -375,7 +553,11 @@ class handler(BaseHTTPRequestHandler):
                         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
                         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                         self.end_headers()
-                        self.wfile.write(json.dumps(file_info).encode())
+                        
+                        response_json = json.dumps(file_info)
+                        logger.info(f"[UPLOAD] Отправка успешного ответа, длина JSON: {len(response_json)} байт")
+                        self.wfile.write(response_json.encode())
+                        logger.info("[UPLOAD] Запрос загрузки файла успешно обработан")
                     else:
                         # Если контент не multipart/form-data, возвращаем ошибку
                         self.send_response(400)
@@ -426,27 +608,50 @@ class handler(BaseHTTPRequestHandler):
             # Для сравнения прайс-листов
             elif self.path == '/api/v1/comparison/compare' or self.path == '/comparison/compare':
                 try:
+                    logger.info("[COMPARE] Получен запрос на сравнение файлов")
+                    start_time = time.time()
+                    
                     # Парсим JSON
                     data = json.loads(post_data.decode('utf-8'))
                     supplier_file = data.get('supplier_file', {})
                     store_file = data.get('store_file', {})
                     
+                    logger.info(f"[COMPARE] Данные поставщика: {supplier_file.get('stored_filename', 'не указано')}")
+                    logger.info(f"[COMPARE] Данные магазина: {store_file.get('stored_filename', 'не указано')}")
+                    
                     # Проверка наличия данных
                     if not supplier_file or not store_file:
+                        error_msg = "Отсутствуют данные о файлах"
+                        logger.error(f"[COMPARE] Ошибка: {error_msg}")
+                        
                         self.send_response(400)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
                         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
                         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                         self.end_headers()
-                        self.wfile.write(json.dumps({"error": "Отсутствуют данные о файлах"}).encode())
+                        self.wfile.write(json.dumps({"error": error_msg}).encode())
                         return
                     
+                    # Логируем информацию о файлах
+                    logger.info(f"[COMPARE] Файл поставщика: id={supplier_file.get('id')}, " +
+                              f"оригинальное имя={supplier_file.get('original_filename')}, " +
+                              f"сохраненное имя={supplier_file.get('stored_filename')}")
+                    logger.info(f"[COMPARE] Файл магазина: id={store_file.get('id')}, " +
+                              f"оригинальное имя={store_file.get('original_filename')}, " +
+                              f"сохраненное имя={store_file.get('stored_filename')}")
+                    
+                    logger.info(f"[COMPARE] Начало сравнения файлов")
                     # Сравниваем файлы
                     result = compare_files(supplier_file, store_file)
                     
+                    compare_time = time.time() - start_time
+                    logger.info(f"[COMPARE] Сравнение файлов завершено за {compare_time:.2f}с")
+                    
                     # Если произошла ошибка
                     if "error" in result:
+                        logger.error(f"[COMPARE] Ошибка при сравнении: {result['error']}")
+                        
                         self.send_response(500)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
@@ -456,6 +661,15 @@ class handler(BaseHTTPRequestHandler):
                         self.wfile.write(json.dumps(result).encode())
                         return
                     
+                    # Логирование результатов сравнения
+                    matches_count = len(result.get('matches', []))
+                    missing_in_store_count = len(result.get('missing_in_store', []))
+                    missing_in_supplier_count = len(result.get('missing_in_supplier', []))
+                    
+                    logger.info(f"[COMPARE] Результаты сравнения: найдено совпадений: {matches_count}, " +
+                              f"отсутствуют в магазине: {missing_in_store_count}, " +
+                              f"отсутствуют у поставщика: {missing_in_supplier_count}")
+                    
                     # Отправляем результат
                     self.send_response(200)
                     self.send_header('Content-type', 'application/json')
@@ -463,8 +677,16 @@ class handler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
                     self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                     self.end_headers()
-                    self.wfile.write(json.dumps(result).encode())
+                    
+                    response_json = json.dumps(result)
+                    logger.info(f"[COMPARE] Отправка успешного ответа, размер JSON: {len(response_json)} байт")
+                    self.wfile.write(response_json.encode())
+                    logger.info(f"[COMPARE] Запрос на сравнение файлов успешно обработан")
+                
                 except Exception as e:
+                    logger.error(f"[COMPARE] Критическая ошибка при обработке запроса: {str(e)}")
+                    logger.error(f"[COMPARE] Трассировка: {traceback.format_exc()}")
+                    
                     self.send_response(500)
                     self.send_header('Content-type', 'application/json')
                     self.send_header('Access-Control-Allow-Origin', '*')
