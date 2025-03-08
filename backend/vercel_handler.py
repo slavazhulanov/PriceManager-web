@@ -559,7 +559,7 @@ class handler(BaseHTTPRequestHandler):
                                             if len(columns) > 1:
                                                 logger.info(f"Используем ручной парсинг с разделителем '{possible_sep}', найдено {len(columns)} колонок")
                                                 return columns
-                                    
+                    
                                     # Если не сработало, используем как есть
                                     logger.warning("Не удалось определить разделитель, возвращаем всю строку как одну колонку")
                                     columns = [header]
@@ -637,6 +637,167 @@ class handler(BaseHTTPRequestHandler):
                 "supabase_connection": "ok" if supabase_ok else "error"
             }).encode())
             return
+        # Обработчик для скачивания файлов
+        elif self.path.startswith('/api/v1/files/download/') or self.path.startswith('/files/download/'):
+            try:
+                # Получаем имя файла из URL
+                parts = self.path.split('/')
+                filename = parts[-1]  # Последняя часть URL - имя файла
+                
+                # Проверяем параметры запроса
+                if '?' in filename:
+                    filename, query = filename.split('?', 1)
+                
+                logger.info(f"[DOWNLOAD] Получен запрос на скачивание файла: {filename}")
+                
+                # Обработка для сэмпл-файла
+                if filename == 'sample':
+                    logger.info("[DOWNLOAD] Запрошен сэмпл-файл, возвращаем тестовый файл")
+                    sample_content = "Артикул,Наименование,Цена,Количество\n10001,Смартфон Samsung,31990,10\n10002,Ноутбук ASUS,54990,5".encode('utf-8')
+                    self.send_response(200)
+                    self.send_header('Content-type', 'text/csv')
+                    self.send_header('Content-Disposition', 'attachment; filename="sample.csv"')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.send_header('Access-Control-Expose-Headers', 'Content-Disposition')
+                    self.end_headers()
+                    self.wfile.write(sample_content)
+                    return
+                
+                # Получаем содержимое файла
+                file_content = get_file_content(filename)
+                
+                if file_content:
+                    logger.info(f"[DOWNLOAD] Файл найден: {filename}, размер: {len(file_content)} байт")
+                    
+                    # Определяем mime-тип на основе расширения
+                    extension = os.path.splitext(filename)[1].lower()
+                    content_type = "application/octet-stream"
+                    
+                    if extension == '.csv':
+                        content_type = 'text/csv'
+                    elif extension in ['.xlsx', '.xls']:
+                        content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    
+                    # Определяем имя файла для отображения
+                    display_name = filename
+                    if display_name.startswith('updated_'):
+                        display_name = display_name.replace('updated_', '')
+                    
+                    logger.info(f"[DOWNLOAD] Отправка файла клиенту: {display_name}, тип: {content_type}")
+                    
+                    # Отправляем файл
+                    self.send_response(200)
+                    self.send_header('Content-type', content_type)
+                    self.send_header('Content-Disposition', f'attachment; filename="{display_name}"')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.send_header('Access-Control-Expose-Headers', 'Content-Disposition')
+                    self.end_headers()
+                    self.wfile.write(file_content)
+                else:
+                    logger.error(f"[DOWNLOAD] Файл не найден: {filename}")
+                    self.send_response(404)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "Файл не найден"}).encode())
+            except Exception as e:
+                logger.error(f"[DOWNLOAD] Ошибка при скачивании файла: {str(e)}")
+                logger.error(f"[DOWNLOAD] Трассировка: {traceback.format_exc()}")
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Ошибка при скачивании файла: {str(e)}"}).encode())
+        # Обработчик для проксирования скачивания
+        elif self.path.startswith('/api/v1/files/proxy-download') or self.path.startswith('/files/proxy-download'):
+            try:
+                # Получаем URL из параметров запроса
+                query_params = {}
+                if '?' in self.path:
+                    query = self.path.split('?', 1)[1]
+                    for param in query.split('&'):
+                        if '=' in param:
+                            key, value = param.split('=', 1)
+                            query_params[key] = value
+                
+                url = query_params.get('url', '')
+                if not url:
+                    raise ValueError("URL не указан")
+                    
+                # Декодируем URL
+                import urllib.parse
+                url = urllib.parse.unquote(url)
+                
+                logger.info(f"[PROXY] Получен запрос на проксирование скачивания: {url}")
+                
+                # Проверяем URL
+                if not url.startswith(('http://', 'https://')):
+                    raise ValueError("Недопустимый URL для проксирования")
+                
+                # Проверяем, принадлежит ли URL к Supabase
+                supabase_url = os.environ.get('SUPABASE_URL', '')
+                if not url.startswith(supabase_url) and 'supabase' not in url:
+                    logger.warning(f"[PROXY] URL не принадлежит Supabase: {url}")
+                
+                # Выполняем запрос к URL
+                import httpx
+                logger.info(f"[PROXY] Отправка запроса к URL: {url}")
+                
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.get(url)
+                    
+                    if not response.is_success:
+                        raise ValueError(f"Ошибка при запросе: {response.status_code} {response.reason_phrase}")
+                    
+                    content = response.content
+                    content_type = response.headers.get('content-type', 'application/octet-stream')
+                    
+                    # Определяем имя файла
+                    content_disposition = response.headers.get('content-disposition', '')
+                    filename = 'downloaded_file'
+                    
+                    if 'filename=' in content_disposition:
+                        filename = content_disposition.split('filename=')[1].strip('"')
+                    else:
+                        # Пытаемся определить из URL
+                        url_parts = url.split('/')
+                        if url_parts:
+                            url_filename = url_parts[-1]
+                            if '?' in url_filename:
+                                url_filename = url_filename.split('?')[0]
+                            if url_filename:
+                                filename = url_filename
+                    
+                    logger.info(f"[PROXY] Файл успешно получен: {filename}, размер: {len(content)} байт, тип: {content_type}")
+                    
+                    # Отправляем файл клиенту
+                    self.send_response(200)
+                    self.send_header('Content-type', content_type)
+                    self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.send_header('Access-Control-Expose-Headers', 'Content-Disposition')
+                    self.end_headers()
+                    self.wfile.write(content)
+            except Exception as e:
+                logger.error(f"[PROXY] Ошибка при проксировании скачивания: {str(e)}")
+                logger.error(f"[PROXY] Трассировка: {traceback.format_exc()}")
+                self.send_response(500)
+                self.send_header('Content-type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Ошибка при проксировании скачивания: {str(e)}"}).encode())
         else:
             self.send_response(404)
             self.send_header('Content-type', 'application/json')
