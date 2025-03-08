@@ -31,19 +31,17 @@ def get_supabase_client():
 # Функция для получения содержимого файла из Supabase
 def get_file_content(stored_filename):
     try:
-        # Для mock-файлов возвращаем заготовленные данные без обращения к Supabase
-        if "mock_" in stored_filename:
-            logger.info(f"Запрошен мок-файл: {stored_filename}, возвращаем тестовые данные")
-            
-            # Генерируем тестовые данные в зависимости от назначения файла
-            if "_supplier" in stored_filename or stored_filename.endswith("3_mock_file.csv") or stored_filename.endswith("0_mock_file.csv"):
-                # Данные поставщика
-                return "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-            else:
-                # Данные магазина
-                return "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
+        # Кеширование файлов в памяти для быстрого доступа (продержится только на время обработки запроса)
+        global file_cache
+        if not hasattr(get_file_content, 'file_cache'):
+            get_file_content.file_cache = {}
         
-        # Для не-мок файлов обращаемся к Supabase
+        # Проверяем кеш
+        if stored_filename in get_file_content.file_cache:
+            logger.info(f"Возвращаем файл из кеша: {stored_filename}")
+            return get_file_content.file_cache[stored_filename]
+        
+        # Настройка клиента Supabase
         supabase = get_supabase_client()
         if not supabase:
             logger.error("Не удалось инициализировать Supabase клиент")
@@ -56,17 +54,45 @@ def get_file_content(stored_filename):
         file_path = f"{folder}/{stored_filename}" if folder else stored_filename
         logger.info(f"Запрос файла из Supabase: бакет={bucket_name}, путь={file_path}")
         
+        # Устанавливаем короткий таймаут, чтобы вписаться в лимит Vercel 10 секунд
+        start_time = time.time()
+        
         try:
             response = supabase.storage.from_(bucket_name).download(file_path)
-            logger.info(f"Файл успешно получен: {stored_filename}, размер: {len(response)} байт")
+            
+            elapsed = time.time() - start_time
+            logger.info(f"Файл получен за {elapsed:.2f}с: {stored_filename}, размер: {len(response)} байт")
+            
+            # Сохраняем в кеш
+            get_file_content.file_cache[stored_filename] = response
             return response
         except Exception as download_error:
-            logger.error(f"Ошибка при загрузке файла через API: {str(download_error)}")
+            elapsed = time.time() - start_time
+            logger.error(f"Ошибка при загрузке файла через API ({elapsed:.2f}с): {str(download_error)}")
             
-            # Если это тестовый файл, возвращаем базовые тестовые данные
-            if stored_filename == "test.csv":
-                logger.info("Возвращаем базовые тестовые данные для test.csv")
-                return "column1,column2,column3\nvalue1,value2,value3\n".encode('utf-8')
+            # Пробуем альтернативный способ через публичный URL, если осталось достаточно времени
+            if elapsed < 3.0:  # Если прошло меньше 3 секунд, пробуем публичный URL
+                try:
+                    import requests
+                    
+                    public_url = supabase.storage.from_(bucket_name).get_public_url(file_path)
+                    logger.info(f"Попытка получения через публичный URL: {public_url}")
+                    
+                    response = requests.get(public_url, timeout=3.0)
+                    if response.status_code == 200:
+                        content = response.content
+                        elapsed_total = time.time() - start_time
+                        logger.info(f"Файл получен через URL за {elapsed_total:.2f}с: {stored_filename}, размер: {len(content)} байт")
+                        
+                        # Сохраняем в кеш
+                        get_file_content.file_cache[stored_filename] = content
+                        return content
+                    else:
+                        logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
+                except Exception as url_error:
+                    logger.error(f"Ошибка при получении через публичный URL: {str(url_error)}")
+            else:
+                logger.warning(f"Пропуск запроса по публичному URL (прошло {elapsed:.2f}с)")
             
             return None
     except Exception as e:
@@ -233,6 +259,24 @@ class handler(BaseHTTPRequestHandler):
             self.send_header('Access-Control-Allow-Headers', 'Content-Type')
             self.end_headers()
             self.wfile.write('{"message": "PriceManager API v1"}'.encode())
+        elif self.path == '/api/v1/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            self.end_headers()
+            
+            # Проверяем соединение с Supabase
+            supabase_ok = get_supabase_client() is not None
+            
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "version": "1.0",
+                "timestamp": time.time(),
+                "supabase_connection": "ok" if supabase_ok else "error"
+            }).encode())
+            return
         else:
             self.send_response(404)
             self.send_header('Content-type', 'application/json')

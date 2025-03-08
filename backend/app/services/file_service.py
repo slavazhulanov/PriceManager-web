@@ -264,34 +264,11 @@ def save_file(filename: str, file_content: bytes) -> str:
 
 def get_file_content(filename: str) -> Optional[bytes]:
     """
-    Получение содержимого файла
+    Получение содержимого файла из Supabase Storage
     """
     logger.info(f"Запрос содержимого файла: {filename}")
     
-    # Возвращаем готовые тестовые данные для mock-файлов
-    # Это сокращает время обработки запроса и исключает обращение к Supabase
-    if "mock_" in filename:
-        logger.info(f"Генерация тестовых данных для мок-файла: {filename}")
-        # Проверяем кеш для оригинального имени
-        cached_content = get_cached_content(filename)
-        if cached_content:
-            logger.info(f"Мок-файл {filename} найден в кеше, размер: {len(cached_content)} байт")
-            return cached_content
-            
-        # Генерируем тестовые данные в зависимости от назначения файла 3242
-        if "_supplier" in filename or filename.endswith("3_mock_file.csv") or filename.endswith("0_mock_file.csv"):
-            # Данные поставщика
-            test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-        else:
-            # Данные магазина
-            test_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
-            
-        # Сохраняем в кеш для следующих запросов
-        cache_file_content(filename, test_content)
-        logger.info(f"Сгенерированы и закешированы данные для мок-файла {filename}, размер: {len(test_content)} байт")
-        return test_content
-    
-    # Для не-мок файлов пробуем получить из кеша
+    # Проверяем кеш первым делом для всех файлов
     cached_content = get_cached_content(filename)
     if cached_content:
         logger.info(f"Файл {filename} найден в кеше, размер: {len(cached_content)} байт")
@@ -310,12 +287,17 @@ def get_file_content(filename: str) -> Optional[bytes]:
         folder = settings.SUPABASE_FOLDER
         file_path = f"{folder}/{filename}" if folder else filename
         
-        logger.info(f"Попытка получения файла из Supabase: бакет={bucket}, путь={file_path}")
-        
-        # На Vercel ограничиваем время выполнения запроса для избежания таймаута
+        # Рассчитываем таймаут в зависимости от среды
         is_vercel = os.environ.get("VERCEL") == "1"
-        timeout = 5.0 if is_vercel else 30.0
+        vercel_timeout = 3.0  # в Vercel используем короткий таймаут, чтобы избежать лимита 10 секунд
+        default_timeout = 20.0
+        timeout = vercel_timeout if is_vercel else default_timeout
         
+        logger.info(f"Попытка получения файла из Supabase: бакет={bucket}, путь={file_path}" + 
+                  (f", таймаут={timeout}с (Vercel)" if is_vercel else f", таймаут={timeout}с"))
+        
+        # Сначала пробуем API метод с меньшим таймаутом для Vercel
+        # В Vercel у нас всего 10 секунд на весь запрос
         try:
             # Пытаемся получить файл через API
             logger.debug(f"Скачивание файла через API: {file_path}")
@@ -332,9 +314,10 @@ def get_file_content(filename: str) -> Optional[bytes]:
             logger.error(f"Ошибка при получении файла через API: {str(api_error)}")
             logger.error(f"Детали ошибки API: {traceback.format_exc()}")
             
+            # В Vercel проверяем, сколько времени осталось до таймаута
+            # Если осталось мало времени, пропускаем запрос по публичному URL
             if is_vercel:
-                # На Vercel не пытаемся использовать публичный URL из-за времени выполнения
-                logger.warning(f"Vercel среда: пропускаем попытку доступа через публичный URL для {filename}")
+                logger.warning("Vercel среда: пропускаем попытку доступа через публичный URL")
                 return None
             
             # Попробуем получить через публичный URL
@@ -360,13 +343,6 @@ def get_file_content(filename: str) -> Optional[bytes]:
     except Exception as e:
         logger.error(f"Ошибка при получении файла {filename}: {str(e)}")
         logger.error(f"Детали общей ошибки: {traceback.format_exc()}")
-    
-    # Если test.csv не найден, возвращаем базовые тестовые данные
-    if filename == "test.csv":
-        logger.warning(f"test.csv не найден, возвращаем базовые тестовые данные")
-        test_content = "column1,column2,column3\nvalue1,value2,value3\n".encode('utf-8')
-        cache_file_content(filename, test_content)
-        return test_content
     
     logger.error(f"Не удалось получить содержимое файла {filename} ни одним из методов")
     return None

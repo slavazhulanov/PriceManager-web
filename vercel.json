@@ -15,17 +15,45 @@
   ],
   "routes": [
     {
+      "src": "/api/v1/health",
+      "dest": "backend/vercel_handler.py",
+      "headers": {
+        "Cache-Control": "no-cache"
+      }
+    },
+    {
+      "src": "/api/v1/files/(.*)",
+      "dest": "backend/vercel_handler.py",
+      "headers": {
+        "Cache-Control": "s-maxage=300, stale-while-revalidate=60"
+      }
+    },
+    {
+      "src": "/api/v1/comparison/(.*)",
+      "dest": "backend/vercel_handler.py",
+      "headers": {
+        "Cache-Control": "no-cache"
+      }
+    },
+    {
       "src": "/api(.*)",
       "dest": "backend/vercel_handler.py",
       "headers": {
-        "Cache-Control": "s-maxage=600, stale-while-revalidate=60"
+        "Cache-Control": "s-maxage=60, stale-while-revalidate=30"
+      }
+    },
+    {
+      "src": "/(.*\\.(js|css|png|jpg|jpeg|gif|ico|svg)$)",
+      "dest": "frontend/$1",
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable"
       }
     },
     {
       "src": "/(.*)",
       "dest": "frontend/$1",
       "headers": {
-        "Cache-Control": "public, max-age=3600, immutable"
+        "Cache-Control": "public, max-age=3600"
       }
     }
   ],

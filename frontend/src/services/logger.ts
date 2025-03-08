@@ -71,7 +71,7 @@ const isVercel = () => {
          window.location.hostname.includes('now.sh');
 };
 
-// Флаг, показывающий что мы находимся в Vercel и логирование отключено
+// Флаг, показывающий что мы находимся в Vercel и логирование на сервер отключено
 const isVercelEnv = isVercel();
 
 /**
@@ -174,10 +174,14 @@ const sendBuffer = async () => {
     return;
   }
   
-  // Если мы на Vercel, просто очищаем буфер и не отправляем логи
+  // В Vercel полностью отключаем отправку логов на сервер
   if (isVercelEnv) {
+    // Только для отладки показываем, что логи были созданы
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[Logger] Vercel среда: ${actionBuffer.length} действий НЕ отправлены на сервер`);
+      console.log(`[Logger] Vercel среда - логирование только в консоль, ${actionBuffer.length} действий`);
+      actionBuffer.forEach(action => {
+        console.log(`[Logger] ${action.action_type}: ${action.component} (${action.page})`, action.details);
+      });
     }
     actionBuffer = [];
     return;
@@ -197,6 +201,25 @@ const sendBuffer = async () => {
   actionBuffer = [];
   
   try {
+    // Для локальной разработки проверяем доступность сервера
+    // Это предотвратит ошибки при запуске только фронтенда
+    if (process.env.NODE_ENV === 'development') {
+      try {
+        const response = await fetch(`${window.location.origin}/api/v1/health`, {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          signal: AbortSignal.timeout(1000) // Таймаут в 1 секунду
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Сервер недоступен: ${response.status}`);
+        }
+      } catch (healthError) {
+        console.warn('Сервер логирования недоступен, логи будут сохранены только локально:', healthError);
+        return;
+      }
+    }
+  
     // Попытка отправки логов
     if (actionsToSend.length === 1) {
       await loggerApi.post('/logs/user-action', actionsToSend[0]);

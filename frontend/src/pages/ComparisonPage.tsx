@@ -247,47 +247,93 @@ const ComparisonPage: React.FC = () => {
           store_file: state.storeFile,
         });
 
-        // Проверяем, есть ли слово "mock" в имени файла
-        const hasMockFiles = 
-          state.supplierFile.stored_filename.includes('mock') || 
-          state.storeFile.stored_filename.includes('mock');
-
         // Определяем, работаем ли мы на Vercel
         const isVercelEnv = window.location.hostname.includes('vercel.app') || 
                           window.location.hostname.includes('now.sh');
 
-        // Если это мок-файлы и мы не на Vercel, предварительно создаем их в кеше
-        if (hasMockFiles && !isVercelEnv) {
+        // Для Vercel настраиваем запрос с таймаутом
+        if (isVercelEnv) {
+          console.log('Vercel среда: настраиваем запрос с коротким таймаутом');
+          
+          // Используем увеличенный таймаут для Vercel
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 8000);
+          
           try {
-            console.log('Подготовка мок-данных в кеше');
-            await fetch(`${window.location.origin}/api/v1/files/create-mock-cache`);
-            console.log('Мок-данные подготовлены');
-          } catch (cacheError) {
-            console.warn('Ошибка при подготовке мок-данных:', cacheError);
+            const response = await fetch(`${window.location.origin}/api/v1/comparison/compare`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                supplier_file: state.supplierFile,
+                store_file: state.storeFile
+              }),
+              signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (!response.ok) {
+              throw new Error(`Ошибка API: ${response.status} ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            console.log('Результат сравнения:', result);
+            
+            if (result && result.matches && result.matches.length > 0) {
+              setComparisonResult(result);
+              setSelectedItems(result.matches);
+              
+              // Логируем успешное сравнение
+              logger.logUserAction('comparison_success', 'comparison', {
+                matches_count: result.matches.length,
+                missing_in_store_count: result.missing_in_store.length,
+                missing_in_supplier_count: result.missing_in_supplier.length
+              });
+            } else {
+              console.warn('Нет совпадений для отображения!');
+              setError('Нет данных для сравнения');
+              
+              // Логируем отсутствие результатов
+              logger.logUserAction('comparison_no_results', 'comparison', {});
+            }
+          } catch (fetchError: any) {
+            console.error('Ошибка при сравнении файлов (Vercel):', fetchError);
+            if (fetchError.name === 'AbortError') {
+              setError('Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте еще раз с файлами меньшего размера.');
+            } else {
+              setError('Ошибка при сравнении файлов: ' + (fetchError.message || 'Неизвестная ошибка'));
+            }
+            
+            // Логируем ошибку
+            logger.logUserAction('comparison_error', 'comparison', {
+              error_message: fetchError.message || 'Неизвестная ошибка',
+              error_type: fetchError.name
+            });
           }
-        } else if (hasMockFiles && isVercelEnv) {
-          console.log('Vercel среда: пропускаем создание мок-данных (будут созданы автоматически)');
-        }
-
-        const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
-        console.log('Результат сравнения:', result);
-
-        if (result && result.matches && result.matches.length > 0) {
-          setComparisonResult(result);
-          setSelectedItems(result.matches);
-          
-          // Логируем успешное сравнение
-          logger.logUserAction('comparison_success', 'comparison', {
-            matches_count: result.matches.length,
-            missing_in_store_count: result.missing_in_store.length,
-            missing_in_supplier_count: result.missing_in_supplier.length
-          });
         } else {
-          console.warn('Нет совпадений для отображения!');
-          setError('Нет данных для сравнения');
-          
-          // Логируем отсутствие результатов
-          logger.logUserAction('comparison_no_results', 'comparison', {});
+          // Для не-Vercel используем обычный API
+          const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
+          console.log('Результат сравнения:', result);
+
+          if (result && result.matches && result.matches.length > 0) {
+            setComparisonResult(result);
+            setSelectedItems(result.matches);
+            
+            // Логируем успешное сравнение
+            logger.logUserAction('comparison_success', 'comparison', {
+              matches_count: result.matches.length,
+              missing_in_store_count: result.missing_in_store.length,
+              missing_in_supplier_count: result.missing_in_supplier.length
+            });
+          } else {
+            console.warn('Нет совпадений для отображения!');
+            setError('Нет данных для сравнения');
+            
+            // Логируем отсутствие результатов
+            logger.logUserAction('comparison_no_results', 'comparison', {});
+          }
         }
       } catch (err: any) {
         console.error('Ошибка при сравнении файлов:', err);
