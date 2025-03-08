@@ -73,22 +73,23 @@ def get_file_content(stored_filename):
             # Пробуем альтернативный способ через публичный URL, если осталось достаточно времени
             if elapsed < 3.0:  # Если прошло меньше 3 секунд, пробуем публичный URL
                 try:
-                    import requests
+                    import httpx
                     
                     public_url = supabase.storage.from_(bucket_name).get_public_url(file_path)
                     logger.info(f"Попытка получения через публичный URL: {public_url}")
                     
-                    response = requests.get(public_url, timeout=3.0)
-                    if response.status_code == 200:
-                        content = response.content
-                        elapsed_total = time.time() - start_time
-                        logger.info(f"Файл получен через URL за {elapsed_total:.2f}с: {stored_filename}, размер: {len(content)} байт")
-                        
-                        # Сохраняем в кеш
-                        get_file_content.file_cache[stored_filename] = content
-                        return content
-                    else:
-                        logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
+                    with httpx.Client(timeout=3.0) as client:
+                        response = client.get(public_url)
+                        if response.status_code == 200:
+                            content = response.content
+                            elapsed_total = time.time() - start_time
+                            logger.info(f"Файл получен через URL за {elapsed_total:.2f}с: {stored_filename}, размер: {len(content)} байт")
+                            
+                            # Сохраняем в кеш
+                            get_file_content.file_cache[stored_filename] = content
+                            return content
+                        else:
+                            logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
                 except Exception as url_error:
                     logger.error(f"Ошибка при получении через публичный URL: {str(url_error)}")
             else:
