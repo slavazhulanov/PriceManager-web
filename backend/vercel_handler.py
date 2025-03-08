@@ -381,13 +381,90 @@ class handler(BaseHTTPRequestHandler):
                 
                 logger.info(f"Получен запрос на получение колонок файла: {filename}")
                 
-                # Определяем тип файла по имени
-                is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
+                # Параметры запроса
+                params = {}
+                if '?' in filename:
+                    filename, query = filename.split('?', 1)
+                    for param in query.split('&'):
+                        if '=' in param:
+                            key, value = param.split('=', 1)
+                            params[key] = value
                 
-                if is_supplier:
-                    columns = ['Артикул', 'Цена поставщика', 'Наименование товара', 'Категория', 'Бренд']
+                # Получаем содержимое файла
+                file_content = get_file_content(filename)
+                
+                if file_content:
+                    logger.info(f"Файл найден: {filename}, размер: {len(file_content)} байт")
+                    
+                    # Определяем кодировку и разделитель
+                    encoding = params.get('encoding', 'utf-8')
+                    separator = params.get('separator', None)
+                    
+                    if not separator:
+                        # Пытаемся определить разделитель автоматически
+                        try:
+                            sample = file_content[:4096].decode(encoding, errors='replace')
+                            first_line = sample.split('\n')[0]
+                            
+                            # Проверка наиболее распространенных разделителей
+                            separators = {',': 0, ';': 0, '\t': 0, '|': 0}
+                            for sep in separators.keys():
+                                separators[sep] = first_line.count(sep)
+                            
+                            max_separator = max(separators.items(), key=lambda x: x[1])
+                            if max_separator[1] > 0:
+                                separator = max_separator[0]
+                                logger.info(f"Автоматически определен разделитель: '{separator}'")
+                            else:
+                                separator = ','
+                                logger.info(f"Не удалось определить разделитель, используется запятая по умолчанию")
+                        except Exception as e:
+                            separator = ','
+                            logger.error(f"Ошибка при определении разделителя: {str(e)}")
+                    
+                    # Получаем расширение файла
+                    extension = os.path.splitext(filename)[1].lower()
+                    
+                    # Читаем колонки из файла
+                    try:
+                        import pandas as pd
+                        import io
+                        
+                        if extension in ['.xlsx', '.xls']:
+                            # Для Excel-файлов
+                            df = pd.read_excel(io.BytesIO(file_content))
+                        elif extension == '.csv':
+                            # Для CSV-файлов
+                            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+                        else:
+                            # Пробуем прочитать как CSV
+                            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+                        
+                        columns = df.columns.tolist()
+                        logger.info(f"Успешно прочитаны колонки из файла: {', '.join(columns)}")
+                        
+                    except Exception as e:
+                        logger.error(f"Ошибка при чтении колонок из файла: {str(e)}")
+                        # Возвращаем предполагаемые колонки в случае ошибки
+                        is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
+                        
+                        if is_supplier:
+                            columns = ['Артикул', 'Цена', 'Наименование товара', 'Категория', 'Бренд']
+                        else:
+                            columns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория']
+                        
+                        logger.warning(f"Не удалось прочитать колонки из файла, используются предполагаемые колонки: {', '.join(columns)}")
                 else:
-                    columns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория']
+                    logger.error(f"Файл не найден: {filename}")
+                    # Если файл не найден, возвращаем предполагаемые колонки
+                    is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
+                    
+                    if is_supplier:
+                        columns = ['Артикул', 'Цена', 'Наименование товара', 'Категория', 'Бренд']
+                    else:
+                        columns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория']
+                    
+                    logger.warning(f"Файл не найден, используются предполагаемые колонки: {', '.join(columns)}")
                 
                 # Отправляем успешный ответ
                 self.send_response(200)
