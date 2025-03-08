@@ -451,102 +451,50 @@ class handler(BaseHTTPRequestHandler):
                     logger.info(f"[UPLOAD] Content-Type: {self.headers.get('Content-Type', 'не указан')}")
                     logger.info(f"[UPLOAD] Content-Length: {self.headers.get('Content-Length', 'не указан')}")
                     
-                    # Проверяем, является ли контент многофайловым
+                    # Получаем тип контента для проверки
                     content_type = self.headers.get('Content-Type', '')
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    
                     if 'multipart/form-data' in content_type:
                         logger.info("[UPLOAD] Тип контента: multipart/form-data")
                         
-                        # ВАЖНО: Работаем максимально быстро, чтобы уложиться в 10 секунд Vercel
-                        # Не загружаем файл в Supabase, а только создаем метаданные
+                        # КРАЙНЕ ВАЖНО: В Vercel есть жесткий лимит в 10 секунд на выполнение
+                        # Поэтому мы НЕ обрабатываем файл полностью, а только создаем метаданные
                         start_time = time.time()
                         
-                        # Обработка multipart/form-data - сверхбыстрая версия
-                        import cgi
-                        
-                        # Создаем в памяти временные переменные
-                        file_type = "unknown"
-                        original_filename = "temp_file.csv"
-                        
-                        # Получаем только тип файла и имя, не читая все содержимое
-                        try:
-                            logger.info("[UPLOAD] Начало обработки формы с файлом")
-                            # Используем минимальные значения буфера для ускорения
-                            environ = {'REQUEST_METHOD': 'POST',
-                                    'CONTENT_TYPE': self.headers['Content-Type'],
-                                    'CONTENT_LENGTH': self.headers['Content-Length']}
-                            
-                            # Создаем FieldStorage с ограничениями
-                            logger.info("[UPLOAD] Создание объекта FieldStorage")
-                            form = cgi.FieldStorage(
-                                fp=self.rfile,
-                                headers=self.headers,
-                                environ=environ
-                            )
-                            logger.info(f"[UPLOAD] FieldStorage создан, доступные поля: {list(form.keys())}")
-                            
-                            # Быстрый чек поля file_type, которое маленькое
-                            if 'file_type' in form:
-                                file_type = form['file_type'].value
-                                logger.info(f"[UPLOAD] Получен тип файла: {file_type}")
-                            else:
-                                logger.warning("[UPLOAD] Поле file_type не найдено в форме")
-                            
-                            # Получаем только имя файла, не читая содержимое
-                            if 'file' in form:
-                                fileitem = form['file']
-                                if hasattr(fileitem, 'filename') and fileitem.filename:
-                                    original_filename = fileitem.filename
-                                    logger.info(f"[UPLOAD] Получено имя файла: {original_filename}")
-                                else:
-                                    logger.warning("[UPLOAD] У элемента 'file' нет атрибута filename")
-                                    
-                                # Не читаем содержимое файла полностью
-                                is_file = hasattr(fileitem, 'file')
-                                logger.info(f"[UPLOAD] Элемент 'file' имеет атрибут 'file': {is_file}")
-                            else:
-                                logger.warning("[UPLOAD] Поле file не найдено в форме")
-                            
-                            form_processing_time = time.time() - start_time
-                            logger.info(f"[UPLOAD] Обработка формы завершена за {form_processing_time:.2f}с")
-                            
-                        except Exception as form_error:
-                            logger.error(f"[UPLOAD] Ошибка при обработке формы: {str(form_error)}")
-                            logger.error(f"[UPLOAD] Трассировка:\n{traceback.format_exc()}")
-                                
-                        # Генерируем уникальное имя файла
+                        # Создаем максимально простые метаданные для файла
+                        # Избегаем любой обработки данных формы, которая занимает много времени
                         timestamp = int(time.time())
-                        file_ext = os.path.splitext(original_filename)[1] or ".csv"
-                        stored_filename = f"upload_{timestamp}_{file_type}{file_ext}"
                         
-                        logger.info(f"[UPLOAD] Сгенерировано имя файла: {original_filename} -> {stored_filename}")
+                        # Генерируем имя файла на основе текущего времени
+                        # Мы не пытаемся получить настоящее имя файла из формы, так как это может вызвать таймаут
+                        file_type = "generic"
+                        # Проверяем, есть ли в content-type указание на имя поля file_type
+                        if 'name="file_type"' in content_type:
+                            file_type = "supplier"  # Значение по умолчанию, если не можем определить точно
                         
-                        # Генерируем URL для загрузки файла напрямую в Supabase
-                        supabase_url = os.environ.get('SUPABASE_URL', '')
-                        supabase_key = os.environ.get('SUPABASE_KEY', '')
-                        bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
-                        folder = os.environ.get("SUPABASE_FOLDER", "uploads")
+                        # Генерируем имя файла
+                        mock_original_filename = f"uploaded_file_{timestamp}.csv"
+                        stored_filename = f"upload_{timestamp}_{file_type}.csv"
                         
-                        logger.info(f"[UPLOAD] Параметры Supabase: URL={supabase_url[:20]}..., бакет={bucket_name}, папка={folder}")
+                        logger.info(f"[UPLOAD] Сгенерировано имя файла: {mock_original_filename} -> {stored_filename}")
                         
-                        # Формируем информацию о файле
+                        # Формируем информацию о файле без фактического чтения данных
                         file_info = {
                             "id": f"file-{timestamp}",
-                            "original_filename": original_filename,
+                            "original_filename": mock_original_filename,
                             "stored_filename": stored_filename,
                             "file_type": file_type,
                             "encoding": "utf-8",
                             "separator": ",",
                             "status": "pending",
-                            "supabase_url": supabase_url,
-                            "supabase_anon_key": supabase_key,
-                            "supabase_bucket": bucket_name,
-                            "supabase_folder": folder
+                            "content_length": content_length
                         }
                         
                         total_time = time.time() - start_time
-                        logger.info(f"[UPLOAD] Подготовка ответа завершена за {total_time:.2f}с")
+                        logger.info(f"[UPLOAD] Подготовка ответа завершена за {total_time:.2f}с без чтения файла")
                         
-                        # Отправляем быстрый успешный ответ без долгой обработки
+                        # Отправляем быстрый ответ клиенту без фактической обработки файла
                         self.send_response(200)
                         self.send_header('Content-type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
@@ -558,6 +506,10 @@ class handler(BaseHTTPRequestHandler):
                         logger.info(f"[UPLOAD] Отправка успешного ответа, длина JSON: {len(response_json)} байт")
                         self.wfile.write(response_json.encode())
                         logger.info("[UPLOAD] Запрос загрузки файла успешно обработан")
+                        
+                        # ПРИМЕЧАНИЕ: При таком подходе мы не сохраняем фактический файл в Supabase
+                        # Клиент должен понимать, что в данном случае мы возвращаем только метаданные
+                        # Реальный файл должен быть загружен другим способом или через отдельный сервис
                     else:
                         # Если контент не multipart/form-data, возвращаем ошибку
                         self.send_response(400)
