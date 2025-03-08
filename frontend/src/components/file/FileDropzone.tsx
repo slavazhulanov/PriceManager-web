@@ -8,7 +8,8 @@ import {
   Alert,
   Button,
   Chip,
-  Stack
+  Stack,
+  LinearProgress
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -38,6 +39,7 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [fileUploaded, setFileUploaded] = useState(isUploaded);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     // Проверяем, что был загружен только один файл
@@ -58,21 +60,81 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
     try {
       setLoading(true);
       setError(null);
+      setUploadProgress(0);
       
       // Проверяем, используем ли реальный API или моки
       const useRealApi = process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true';
       console.log(`Режим API: ${useRealApi ? 'Реальный API' : 'Mock API'}, file: ${file.name}`);
       
       if (useRealApi) {
-        // Используем реальный API для загрузки
-        console.log('Загрузка файла через реальный API');
-        const fileInfo = await fileService.uploadFile(file, fileType);
-        onFileUploaded(fileInfo);
-        setFileUploaded(true);
+        // Используем прямую загрузку в Supabase для производительности
+        try {
+          // Шаг 1: Получаем URL для загрузки
+          console.log('Запрос URL для прямой загрузки в Supabase');
+          const { uploadUrl, fileInfo } = await fileService.getUploadUrl(file.name, fileType);
+          
+          // Шаг 2: Загружаем файл напрямую в Supabase
+          console.log('Начало прямой загрузки в Supabase', uploadUrl);
+          setUploadProgress(10);
+          
+          // Имитируем прогресс загрузки
+          const progressInterval = setInterval(() => {
+            setUploadProgress(prev => {
+              if (prev >= 90) {
+                clearInterval(progressInterval);
+                return 90;
+              }
+              return prev + 10;
+            });
+          }, 300);
+          
+          const uploadSuccess = await fileService.uploadToSupabase(file, uploadUrl);
+          clearInterval(progressInterval);
+          
+          if (!uploadSuccess) {
+            throw new Error('Не удалось загрузить файл в Supabase');
+          }
+          
+          setUploadProgress(95);
+          console.log('Файл успешно загружен в Supabase');
+          
+          // Шаг 3: Регистрируем файл в нашем API
+          console.log('Регистрация файла в системе');
+          const registeredFileInfo = await fileService.registerUploadedFile(fileInfo);
+          
+          setUploadProgress(100);
+          console.log('Файл успешно зарегистрирован:', registeredFileInfo);
+          
+          onFileUploaded(registeredFileInfo);
+          setFileUploaded(true);
+        } catch (supabaseError: any) {
+          console.error('Ошибка при прямой загрузке в Supabase:', supabaseError);
+          
+          // Если прямая загрузка не удалась, используем резервный метод
+          console.log('Использование резервного метода загрузки');
+          const fileInfo = await fileService.uploadFile(file, fileType);
+          onFileUploaded(fileInfo);
+          setFileUploaded(true);
+        }
       } else {
         // Для демонстрации просто имитируем загрузку
         console.log('Загрузка файла через Mock API');
+        
+        // Имитируем прогресс загрузки
+        const progressInterval = setInterval(() => {
+          setUploadProgress(prev => {
+            if (prev >= 90) {
+              clearInterval(progressInterval);
+              return 90;
+            }
+            return prev + 10;
+          });
+        }, 200);
+        
         setTimeout(() => {
+          clearInterval(progressInterval);
+          setUploadProgress(100);
+          
           // Для файлов с mock_ в имени не добавляем префикс, иначе добавляем
           const mockFilename = file.name.toLowerCase().includes('mock_') 
             ? file.name 
@@ -95,6 +157,7 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке файла.');
       console.error('Ошибка при загрузке файла:', err);
+      setUploadProgress(0);
     } finally {
       setLoading(false);
     }
@@ -161,6 +224,15 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
         <Alert severity="error" sx={{ mb: 2, width: '100%' }}>
           {error}
         </Alert>
+      )}
+      
+      {uploadProgress > 0 && uploadProgress < 100 && (
+        <Box sx={{ width: '100%', mb: 2 }}>
+          <LinearProgress variant="determinate" value={uploadProgress} />
+          <Typography variant="caption" align="center" display="block" sx={{ mt: 1 }}>
+            Загрузка файла: {uploadProgress}%
+          </Typography>
+        </Box>
       )}
       
       {fileUploaded ? (

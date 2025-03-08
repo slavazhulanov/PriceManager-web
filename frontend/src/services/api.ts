@@ -68,6 +68,49 @@ export const fileService = {
     return response.data;
   },
   
+  // Получение URL для прямой загрузки в Supabase
+  async getUploadUrl(fileName: string, fileType: FileType): Promise<{ uploadUrl: string, fileInfo: any }> {
+    const response = await api.post('files/upload_url', {
+      fileName,
+      fileType
+    });
+    
+    return response.data;
+  },
+  
+  // Прямая загрузка файла в Supabase по полученному URL
+  async uploadToSupabase(file: File, uploadUrl: string): Promise<boolean> {
+    try {
+      // Используем fetch вместо axios для загрузки напрямую
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: file
+      });
+      
+      if (!response.ok) {
+        console.error('Ошибка при загрузке в Supabase:', response.statusText);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Ошибка при загрузке в Supabase:', error);
+      return false;
+    }
+  },
+  
+  // Регистрация файла после прямой загрузки в Supabase
+  async registerUploadedFile(fileInfo: any): Promise<FileInfo> {
+    const response = await api.post('files/register', {
+      fileInfo
+    });
+    
+    return response.data;
+  },
+  
   // Получение списка колонок из файла
   async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
     const params: any = {};
