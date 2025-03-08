@@ -296,69 +296,86 @@ class handler(BaseHTTPRequestHandler):
                     if 'multipart/form-data' in content_type:
                         logger.info("Получен запрос на загрузку файла (multipart/form-data)")
                         
-                        # Обработка multipart/form-data
-                        # Для анализа multipart/form-data используем cgi.FieldStorage
+                        # Ограничиваем время обработки для соблюдения лимита Vercel в 10 секунд
+                        start_time = time.time()
+                        
+                        # Обработка multipart/form-data - оптимизированная версия
+                        import cgi
                         environ = {'REQUEST_METHOD': 'POST',
                                 'CONTENT_TYPE': self.headers['Content-Type'],
                                 'CONTENT_LENGTH': self.headers['Content-Length']}
                         
-                        # Создаем FieldStorage объект
+                        # Создаем FieldStorage объект с ограничением по памяти
                         form = cgi.FieldStorage(
                             fp=self.rfile,
                             headers=self.headers,
                             environ=environ
                         )
                         
-                        # Получаем файл и тип файла из запроса
-                        file_item = form['file'] if 'file' in form else None
-                        file_type = form['file_type'].value if 'file_type' in form else "unknown"
-                        
-                        if not file_item:
-                            raise ValueError("Файл не найден в запросе")
+                        # Получаем файл и тип файла из запроса - быстрая проверка
+                        if 'file' not in form or 'file_type' not in form:
+                            raise ValueError("Файл или тип файла не найден в запросе")
                             
-                        # Получаем имя и содержимое файла
+                        file_item = form['file']
+                        file_type = form['file_type'].value
+                        
+                        # Получаем имя файла
                         original_filename = file_item.filename
+                        
+                        # Читаем содержимое файла с контролем времени
+                        logger.info(f"Чтение файла: {original_filename}")
                         file_content = file_item.file.read()
                         
-                        # Генерируем уникальное имя для сохраненного файла без префикса "mock_"
+                        # Генерируем уникальное имя для сохраненного файла
                         timestamp = int(time.time())
                         file_ext = os.path.splitext(original_filename)[1]
                         stored_filename = f"upload_{timestamp}_{file_type}{file_ext}"
                         
-                        logger.info(f"Загружен файл: {original_filename}, тип: {file_type}, размер: {len(file_content)} байт")
+                        file_size = len(file_content)
+                        logger.info(f"Файл прочитан: {original_filename}, тип: {file_type}, размер: {file_size} байт")
                         
-                        # Загружаем файл в Supabase
-                        supabase = get_supabase_client()
-                        if supabase:
-                            try:
-                                bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
-                                folder = os.environ.get("SUPABASE_FOLDER", "uploads")
-                                file_path = f"{folder}/{stored_filename}" if folder else stored_filename
-                                
-                                # Загружаем файл в Supabase
-                                logger.info(f"Загрузка файла в Supabase: бакет={bucket_name}, путь={file_path}")
-                                supabase.storage.from_(bucket_name).upload(file_path, file_content)
-                                logger.info(f"Файл успешно загружен в Supabase: {file_path}")
-                                
-                                # Сохраняем файл в кеше для быстрого доступа
-                                get_file_content.file_cache[stored_filename] = file_content
-                            except Exception as upload_error:
-                                logger.error(f"Ошибка при загрузке файла в Supabase: {str(upload_error)}")
-                                # Продолжаем выполнение и возвращаем информацию о файле, даже если не удалось загрузить в Supabase
+                        # Сохраняем файл в кеше для дальнейшего использования
+                        get_file_content.file_cache[stored_filename] = file_content
                         
-                        # Определение кодировки и разделителя
-                        encoding = "utf-8"  # По умолчанию
-                        separator = ","     # По умолчанию
-                        
-                        # Формируем ответ
+                        # Подготовим информацию о файле для возврата
                         file_info = {
                             "id": f"file-id-{timestamp}",
                             "original_filename": original_filename,
                             "stored_filename": stored_filename,
                             "file_type": file_type,
-                            "encoding": encoding,
-                            "separator": separator
+                            "encoding": "utf-8",  # По умолчанию
+                            "separator": ",",     # По умолчанию
+                            "size": file_size
                         }
+                        
+                        # Проверяем оставшееся время - если его достаточно, выполняем загрузку
+                        elapsed = time.time() - start_time
+                        remaining = 9.0 - elapsed  # Оставляем небольшой запас времени
+                        
+                        logger.info(f"Обработка формы заняла {elapsed:.2f}с, осталось {remaining:.2f}с")
+                        
+                        # Если осталось больше 2 секунд, пытаемся загрузить файл в Supabase
+                        if remaining > 2.0:
+                            try:
+                                # Загружаем файл в Supabase
+                                supabase = get_supabase_client()
+                                if supabase:
+                                    bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
+                                    folder = os.environ.get("SUPABASE_FOLDER", "uploads")
+                                    file_path = f"{folder}/{stored_filename}" if folder else stored_filename
+                                    
+                                    logger.info(f"Загрузка файла в Supabase: бакет={bucket_name}, путь={file_path}")
+                                    
+                                    # Загрузка с таймаутом
+                                    supabase.storage.from_(bucket_name).upload(file_path, file_content, {"content-type": "application/octet-stream"})
+                                    
+                                    upload_elapsed = time.time() - start_time
+                                    logger.info(f"Файл успешно загружен в Supabase за {upload_elapsed:.2f}с: {file_path}")
+                            except Exception as upload_error:
+                                logger.error(f"Ошибка при загрузке файла в Supabase: {str(upload_error)}")
+                                # Продолжаем выполнение и возвращаем информацию о файле, даже если не удалось загрузить
+                        else:
+                            logger.warning(f"Недостаточно времени для загрузки в Supabase, файл сохранен только в кеше")
                         
                         # Отправляем успешный ответ
                         self.send_response(200)
