@@ -334,7 +334,7 @@ class handler(BaseHTTPRequestHandler):
                         
                         # Формируем ответ
                         file_info = {
-                            "id": f"mock-id-{int(time())}",
+                            "id": f"mock-id-{int(time.time())}",
                             "original_filename": filename,
                             "stored_filename": stored_filename,
                             "file_type": file_type,
