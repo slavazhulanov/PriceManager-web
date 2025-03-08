@@ -1,5 +1,11 @@
 import axios from 'axios';
-import { FileInfo, FileType, PriceUpdate, ComparisonResult } from '../types';
+import { 
+  FileInfo, 
+  FileType, 
+  ComparisonResult, 
+  PriceUpdate,
+  UpdatedFileResponse
+} from '../types';
 
 // Определение базового URL API в зависимости от окружения
 const getApiUrl = () => {
@@ -174,7 +180,7 @@ export const priceService = {
   },
   
   // Сохранение обновленного файла
-  async saveUpdatedFile(storeFile: FileInfo, updates: PriceUpdate[]): Promise<{ filename: string, download_url: string, count: number }> {
+  async saveUpdatedFile(storeFile: FileInfo, updates: PriceUpdate[]): Promise<UpdatedFileResponse> {
     // Добавляем в запрос информацию о необходимости сохранения оригинального формата файла
     const response = await api.post('prices/save', {
       store_file: storeFile,

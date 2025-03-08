@@ -28,6 +28,34 @@ export interface PriceUpdate {
   store_name?: string;
 }
 
+export interface ValidationErrorDetails {
+  error_type: string;
+  message?: string;
+  original_count?: number;
+  updated_count?: number;
+  difference?: number;
+  updates_verified?: number;
+  updates_failed?: number;
+  failed_examples?: Array<any>;
+}
+
+export interface ValidationResult {
+  status: 'success' | 'failed';
+  errors?: ValidationErrorDetails;
+  original_row_count?: number;
+  updated_row_count?: number;
+  updates_verified?: number;
+}
+
+export interface UpdatedFileResponse {
+  filename: string;
+  download_url: string;
+  count: number;
+  success?: boolean;
+  message?: string;
+  validation?: ValidationResult;
+}
+
 export interface MatchedItem {
   article: string;
   supplier_price: number;

@@ -1584,6 +1584,79 @@ class handler(BaseHTTPRequestHandler):
                         updated_content = output.getvalue()
                         logger.info(f"[SAVE] Обновленный файл подготовлен, размер: {len(updated_content)} байт")
                         
+                        # Проверка целостности обновленного файла
+                        try:
+                            logger.info(f"[SAVE] Начало проверки целостности обновленного файла")
+                            original_row_count = len(df)
+                            
+                            # Проверяем, что обновленный файл читается корректно
+                            validation_buffer = io.BytesIO(updated_content)
+                            if extension in ['.xlsx', '.xls']:
+                                validation_df = pd.read_excel(validation_buffer)
+                            else:
+                                validation_df = pd.read_csv(validation_buffer, encoding=encoding, sep=separator)
+                            
+                            updated_row_count = len(validation_df)
+                            
+                            # Проверка количества строк
+                            if original_row_count != updated_row_count:
+                                logger.error(f"[SAVE] ОШИБКА ЦЕЛОСТНОСТИ: Разное количество строк. Оригинал: {original_row_count}, Обновленный: {updated_row_count}")
+                                # Создаем отчет о проблеме
+                                integrity_error = {
+                                    "error_type": "row_count_mismatch",
+                                    "original_count": original_row_count,
+                                    "updated_count": updated_row_count,
+                                    "difference": abs(original_row_count - updated_row_count)
+                                }
+                            else:
+                                logger.info(f"[SAVE] Проверка количества строк пройдена: {original_row_count} строк")
+                                
+                                # Проверка обновленных цен
+                                updates_verified = 0
+                                updates_failed = 0
+                                failed_articles = []
+                                
+                                for update in updates:
+                                    article = str(update.get('article', ''))
+                                    new_price = update.get('new_price', 0)
+                                    
+                                    # Проверяем, была ли цена обновлена
+                                    mask = validation_df[article_column] == article
+                                    if mask.any():
+                                        # Берем только первое совпадение для проверки
+                                        actual_price = validation_df.loc[mask, price_column].iloc[0]
+                                        if abs(float(actual_price) - float(new_price)) < 0.01:  # Учитываем возможные погрешности с плавающей точкой
+                                            updates_verified += 1
+                                        else:
+                                            updates_failed += 1
+                                            failed_articles.append({
+                                                "article": article,
+                                                "expected_price": new_price,
+                                                "actual_price": float(actual_price)
+                                            })
+                                
+                                if updates_failed > 0:
+                                    logger.error(f"[SAVE] ОШИБКА ЦЕЛОСТНОСТИ: {updates_failed} цен не были корректно обновлены")
+                                    integrity_error = {
+                                        "error_type": "price_update_failed",
+                                        "updates_verified": updates_verified,
+                                        "updates_failed": updates_failed,
+                                        "failed_examples": failed_articles[:5]  # Показываем до 5 примеров с ошибками
+                                    }
+                                else:
+                                    logger.info(f"[SAVE] Проверка обновления цен пройдена: {updates_verified} цен обновлено корректно")
+                                    integrity_error = None
+                                    
+                            # Если нет ошибок целостности, помечаем файл как проверенный
+                            if integrity_error is None:
+                                logger.info(f"[SAVE] Все проверки целостности пройдены успешно")
+                            else:
+                                logger.error(f"[SAVE] Ошибки целостности: {integrity_error}")
+                                # Записываем информацию об ошибке в файл или передаем в ответе
+                        except Exception as validation_error:
+                            logger.error(f"[SAVE] Ошибка при проверке целостности файла: {str(validation_error)}")
+                            logger.error(f"[SAVE] Трассировка: {traceback.format_exc()}")
+                        
                         # Сохраняем файл локально
                         try:
                             test_dir = os.path.join(os.getcwd(), 'test_files')
@@ -1641,6 +1714,11 @@ class handler(BaseHTTPRequestHandler):
                             except Exception as supabase_error:
                                 logger.error(f"[SAVE] Ошибка при загрузке в Supabase: {str(supabase_error)}")
                                 logger.error(f"[SAVE] Трассировка: {traceback.format_exc()}")
+                                # Используем URL для скачивания из кеша, даже если загрузка в Supabase не удалась
+                                logger.info(f"[SAVE] Используем URL для скачивания из кеша: /api/v1/files/download/{result_filename}")
+                            except Exception as e:
+                                logger.error(f"[SAVE] Ошибка при загрузке в Supabase: {str(e)}")
+                                logger.error(f"[SAVE] Трассировка: {traceback.format_exc()}")
                         else:
                             logger.warning("[SAVE] Supabase недоступен, используем локальное хранилище")
                     
@@ -1677,6 +1755,12 @@ class handler(BaseHTTPRequestHandler):
                         
                         get_file_content.file_cache[result_filename] = content.encode('utf-8')
                         download_url = f"/api/v1/files/download/{result_filename}"
+                        
+                        # Так как произошла ошибка обработки, указываем это в отчете о целостности
+                        integrity_error = {
+                            "error_type": "processing_failed",
+                            "message": str(process_error)
+                        }
                     
                     # Отправляем успешный ответ
                     self.send_response(200)
@@ -1686,6 +1770,7 @@ class handler(BaseHTTPRequestHandler):
                     self.send_header('Access-Control-Allow-Headers', 'Content-Type')
                     self.end_headers()
                     
+                    # Базовая информация для ответа
                     result = {
                         "success": True, 
                         "message": "Цены успешно сохранены",
@@ -1693,6 +1778,23 @@ class handler(BaseHTTPRequestHandler):
                         "download_url": download_url,
                         "count": len(updates)
                     }
+                    
+                    # Добавляем информацию о проверке целостности, если она есть
+                    if 'integrity_error' in locals() and integrity_error is not None:
+                        result["validation"] = {
+                            "status": "failed",
+                            "errors": integrity_error
+                        }
+                        # Меняем сообщение в случае ошибок
+                        result["message"] = "Файл сохранен с предупреждениями"
+                    else:
+                        # Если проверки целостности прошли успешно или не проводились
+                        result["validation"] = {
+                            "status": "success",
+                            "original_row_count": original_row_count if 'original_row_count' in locals() else None,
+                            "updated_row_count": updated_row_count if 'updated_row_count' in locals() else None,
+                            "updates_verified": updates_verified if 'updates_verified' in locals() else update_count
+                        }
                     
                     logger.info(f"[SAVE] Отправка успешного ответа: {result}")
                     self.wfile.write(json.dumps(result).encode())

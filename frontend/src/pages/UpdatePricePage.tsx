@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Typography, 
   Box, 
@@ -29,7 +29,7 @@ import {
   IconButton
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MatchedItem, FileInfo, PriceUpdate } from '../types';
+import { MatchedItem, FileInfo, PriceUpdate, UpdatedFileResponse } from '../types';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
@@ -37,6 +37,11 @@ import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import GetAppIcon from '@mui/icons-material/GetApp';
 import { priceService } from '../services/api';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
+import DownloadIcon from '@mui/icons-material/Download';
+import HomeIcon from '@mui/icons-material/Home';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { useLogger } from '../hooks/useLogger';
 
 interface LocationState {
   selectedItems: MatchedItem[];
@@ -54,17 +59,16 @@ const UpdatePricePage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as LocationState;
+  const logger = useLogger('update-price');
   
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState(0);
-  const [selectedItems, setSelectedItems] = useState<MatchedItem[]>(
-    state?.selectedItems || []
-  );
+  const [selectedItems, setSelectedItems] = useState<MatchedItem[]>([]);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   // Добавляем состояние для обновленного файла
-  const [updatedFile, setUpdatedFile] = useState<UpdatedFileInfo | null>(null);
+  const [updatedFile, setUpdatedFile] = useState<UpdatedFileResponse | null>(null);
   
   // Состояние для отслеживания статуса обновления
   const [isUpdating, setIsUpdating] = useState(false);
@@ -89,6 +93,15 @@ const UpdatePricePage: React.FC = () => {
     }
   ];
   
+  // Импортируем данные из состояния маршрутизации при монтировании
+  useEffect(() => {
+    if (state?.selectedItems && state?.storeFile) {
+      setSelectedItems(state.selectedItems);
+    } else {
+      setError('Необходимо выбрать товары для обновления цен');
+    }
+  }, [state]);
+  
   // Обработчик удаления товара из списка
   const handleRemoveItem = (article: string) => {
     setSelectedItems(selectedItems.filter(item => item.article !== article));
@@ -111,48 +124,78 @@ const UpdatePricePage: React.FC = () => {
   
   // Обработчик подтверждения обновления цен
   const handleConfirmUpdate = () => {
-    console.log('Начало обработки подтверждения обновления');
-    setIsUpdating(true);
-    setUpdateCompleted(false);
+    if (!state.storeFile || selectedItems.length === 0) {
+      setError('Необходимо выбрать товары для обновления');
+      return;
+    }
     
-    // Закрываем диалог подтверждения
-    setConfirmDialogOpen(false);
-    
-    console.log('Отправка данных для обновления:', {
-      storeFile: state.storeFile,
-      updates: selectedItems.map(item => ({
-        article: item.article,
-        old_price: item.store_price,
-        new_price: item.supplier_price,
-        supplier_name: item.supplier_name,
-        store_name: item.store_name
-      }))
-    });
-    
-    priceService.saveUpdatedFile(state.storeFile!, selectedItems.map(item => ({
+    // Создаем массив обновлений с правильными полями согласно типу PriceUpdate
+    const updates: PriceUpdate[] = selectedItems.map(item => ({
       article: item.article,
       old_price: item.store_price,
       new_price: item.supplier_price,
       supplier_name: item.supplier_name,
       store_name: item.store_name
-    })))
-      .then(response => {
-        console.log('Успешный ответ от сервера:', response);
-        setUpdatedFile(response);
+    }));
+    
+    setIsUpdating(true);
+    setError(null);
+    setSuccess(null);
+    
+    // Сохраняем обновленный файл
+    const saveUpdatedFile = async () => {
+      try {
+        const result = await priceService.saveUpdatedFile(state.storeFile, updates);
+        console.log('Результат сохранения файла:', result);
+        
+        setUpdatedFile(result);
+        
+        // Проверяем результаты валидации
+        if (result.validation) {
+          // Если есть проблемы с целостностью файла
+          if (result.validation.status === 'failed' && result.validation.errors) {
+            const errors = result.validation.errors;
+            
+            if (errors.error_type === 'row_count_mismatch') {
+              setError(`Внимание! Количество строк в обновленном файле (${errors.updated_count}) 
+                отличается от оригинала (${errors.original_count}). 
+                Разница: ${errors.difference} строк. Файл может быть некорректным.`);
+            } 
+            else if (errors.error_type === 'price_update_failed') {
+              setError(`Обратите внимание! ${errors.updates_failed} из ${errors.updates_failed! + errors.updates_verified!} 
+                обновлений цен не были корректно применены. Пожалуйста, проверьте скачанный файл.`);
+            }
+            else if (errors.error_type === 'processing_failed') {
+              setError(`При обработке файла произошла ошибка: ${errors.message}. 
+                Скачанный файл может содержать только базовые данные.`);
+            }
+          } 
+          else if (result.validation.status === 'success') {
+            // Успешная валидация
+            const verified = result.validation.updates_verified;
+            if (verified) {
+              setSuccess(`Успешно проверено ${verified} обновлений цен. Файл готов к скачиванию.`);
+            }
+          }
+        }
+        
         setUpdateCompleted(true);
+      } catch (e: any) {
+        console.error('Ошибка при сохранении файла:', e);
+        setError(`Ошибка при сохранении файла: ${e.message || 'Неизвестная ошибка'}`);
+      } finally {
         setIsUpdating(false);
-        setSuccess(true); // Устанавливаем флаг успешного завершения для отображения финального шага
-      })
-      .catch((error) => {
-        console.error('Ошибка при обновлении цен:', error);
-        setErrorOccurred(true);
-        setIsUpdating(false);
-      });
+      }
+    };
+    
+    // Запускаем процесс сохранения
+    saveUpdatedFile();
   };
   
   // Обработчик отмены обновления цен
   const handleCancelUpdate = () => {
-    setConfirmDialogOpen(false);
+    setSelectedItems([]);
+    navigate('/');
   };
   
   // Обработчик возврата к сравнению
