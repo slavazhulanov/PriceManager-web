@@ -137,7 +137,71 @@ def read_file(file_content, extension, encoding, separator):
         if extension in ['.xlsx', '.xls']:
             df = pd.read_excel(io.BytesIO(file_content))
         else:  # CSV
-            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+            # Проверка исходных данных
+            logger.info(f"Чтение CSV-файла с кодировкой {encoding} и разделителем '{separator}'")
+            try:
+                # Сначала пробуем прочитать первую строку для проверки
+                sample = file_content[:4096].decode(encoding, errors='replace')
+                first_line = sample.split('\n')[0].strip()
+                logger.info(f"Первая строка файла: {first_line}")
+                
+                # Особая обработка для определения правильного разделителя
+                if ',' in first_line and separator != ',':
+                    logger.info(f"В файле обнаружены запятые, но указан разделитель '{separator}'. Пробуем определить разделитель точнее.")
+                    separators = {',': first_line.count(','), ';': first_line.count(';'), '\t': first_line.count('\t'), '|': first_line.count('|')}
+                    max_separator = max(separators.items(), key=lambda x: x[1])
+                    if max_separator[1] > 0:
+                        logger.info(f"Переопределен разделитель: '{max_separator[0]}' вместо '{separator}'")
+                        separator = max_separator[0]
+            except Exception as e:
+                logger.error(f"Ошибка при анализе первой строки: {str(e)}")
+                
+            # Попытка прочитать файл с разными настройками
+            try:
+                df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+                
+                # Если получилась только одна колонка, и в ней есть разделители, значит separator неправильный
+                if len(df.columns) == 1 and any(sep in df.columns[0] for sep in [',', ';', '\t', '|']):
+                    logger.warning(f"Файл прочитан с одной колонкой: '{df.columns[0]}', что указывает на неправильный разделитель")
+                    
+                    # Пробуем разные разделители
+                    for possible_sep in [',', ';', '\t', '|']:
+                        if possible_sep in df.columns[0]:
+                            logger.info(f"Пробуем разделитель '{possible_sep}'")
+                            try:
+                                test_df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=possible_sep)
+                                if len(test_df.columns) > 1:
+                                    logger.info(f"Успешно определен разделитель '{possible_sep}', получено {len(test_df.columns)} колонок")
+                                    df = test_df
+                                    separator = possible_sep
+                                    break
+                            except Exception as e:
+                                logger.error(f"Ошибка при попытке использовать разделитель '{possible_sep}': {str(e)}")
+            except Exception as e:
+                logger.error(f"Ошибка при чтении CSV файла: {str(e)}")
+                # Пробуем альтернативный метод
+                logger.info("Пробуем альтернативный метод чтения CSV")
+                
+                # Читаем первую строку для определения колонок
+                sample_text = file_content.decode(encoding, errors='replace')
+                lines = sample_text.split('\n')
+                if lines:
+                    header = lines[0].strip()
+                    # Пробуем разные разделители
+                    for possible_sep in [',', ';', '\t', '|']:
+                        if possible_sep in header:
+                            columns = [col.strip() for col in header.split(possible_sep)]
+                            logger.info(f"Разделение заголовка по '{possible_sep}': {columns}")
+                            
+                            # Проверяем, что получили разумное количество колонок
+                            if len(columns) > 1:
+                                logger.info(f"Используем ручной парсинг с разделителем '{possible_sep}', найдено {len(columns)} колонок")
+                                return columns
+                    
+                    # Если не сработало, используем как есть
+                    logger.warning("Не удалось определить разделитель, возвращаем всю строку как одну колонку")
+                    columns = [header]
+                    return columns
         return df
     except Exception as e:
         logger.error(f"Ошибка при чтении файла: {str(e)}")
@@ -435,7 +499,71 @@ class handler(BaseHTTPRequestHandler):
                             df = pd.read_excel(io.BytesIO(file_content))
                         elif extension == '.csv':
                             # Для CSV-файлов
-                            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+                            # Проверка исходных данных
+                            logger.info(f"Чтение CSV-файла с кодировкой {encoding} и разделителем '{separator}'")
+                            try:
+                                # Сначала пробуем прочитать первую строку для проверки
+                                sample = file_content[:4096].decode(encoding, errors='replace')
+                                first_line = sample.split('\n')[0].strip()
+                                logger.info(f"Первая строка файла: {first_line}")
+                                
+                                # Особая обработка для определения правильного разделителя
+                                if ',' in first_line and separator != ',':
+                                    logger.info(f"В файле обнаружены запятые, но указан разделитель '{separator}'. Пробуем определить разделитель точнее.")
+                                    separators = {',': first_line.count(','), ';': first_line.count(';'), '\t': first_line.count('\t'), '|': first_line.count('|')}
+                                    max_separator = max(separators.items(), key=lambda x: x[1])
+                                    if max_separator[1] > 0:
+                                        logger.info(f"Переопределен разделитель: '{max_separator[0]}' вместо '{separator}'")
+                                        separator = max_separator[0]
+                            except Exception as e:
+                                logger.error(f"Ошибка при анализе первой строки: {str(e)}")
+                                
+                            # Попытка прочитать файл с разными настройками
+                            try:
+                                df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+                                
+                                # Если получилась только одна колонка, и в ней есть разделители, значит separator неправильный
+                                if len(df.columns) == 1 and any(sep in df.columns[0] for sep in [',', ';', '\t', '|']):
+                                    logger.warning(f"Файл прочитан с одной колонкой: '{df.columns[0]}', что указывает на неправильный разделитель")
+                                    
+                                    # Пробуем разные разделители
+                                    for possible_sep in [',', ';', '\t', '|']:
+                                        if possible_sep in df.columns[0]:
+                                            logger.info(f"Пробуем разделитель '{possible_sep}'")
+                                            try:
+                                                test_df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=possible_sep)
+                                                if len(test_df.columns) > 1:
+                                                    logger.info(f"Успешно определен разделитель '{possible_sep}', получено {len(test_df.columns)} колонок")
+                                                    df = test_df
+                                                    separator = possible_sep
+                                                    break
+                                            except Exception as e:
+                                                logger.error(f"Ошибка при попытке использовать разделитель '{possible_sep}': {str(e)}")
+                            except Exception as e:
+                                logger.error(f"Ошибка при чтении CSV файла: {str(e)}")
+                                # Пробуем альтернативный метод
+                                logger.info("Пробуем альтернативный метод чтения CSV")
+                                
+                                # Читаем первую строку для определения колонок
+                                sample_text = file_content.decode(encoding, errors='replace')
+                                lines = sample_text.split('\n')
+                                if lines:
+                                    header = lines[0].strip()
+                                    # Пробуем разные разделители
+                                    for possible_sep in [',', ';', '\t', '|']:
+                                        if possible_sep in header:
+                                            columns = [col.strip() for col in header.split(possible_sep)]
+                                            logger.info(f"Разделение заголовка по '{possible_sep}': {columns}")
+                                            
+                                            # Проверяем, что получили разумное количество колонок
+                                            if len(columns) > 1:
+                                                logger.info(f"Используем ручной парсинг с разделителем '{possible_sep}', найдено {len(columns)} колонок")
+                                                return columns
+                                    
+                                    # Если не сработало, используем как есть
+                                    logger.warning("Не удалось определить разделитель, возвращаем всю строку как одну колонку")
+                                    columns = [header]
+                                    return columns
                         else:
                             # Пробуем прочитать как CSV
                             df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
