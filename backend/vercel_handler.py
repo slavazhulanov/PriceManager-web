@@ -192,7 +192,105 @@ class VercelHandler(BaseHTTPRequestHandler):
 # Функция-обработчик для Vercel
 def handler(event, context):
     """
-    Основная функция-обработчик для Vercel Serverless
-    Должна возвращать класс, который является подклассом BaseHTTPRequestHandler
+    Обработчик Vercel-функции в формате AWS Lambda
     """
-    return VercelHandler
+    # Преобразуем событие API Gateway в формат, понятный для обработки
+    try:
+        # Логирование входящего запроса
+        logger.info(f"Получен запрос: {event}")
+        
+        # Извлекаем метод и путь из события
+        http_method = event.get('httpMethod', 'GET')
+        path = event.get('path', '/')
+        
+        # Обработка запроса в зависимости от метода
+        if http_method == 'GET':
+            # Обработка GET запросов
+            if path == '/' or path == '/api':
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type'
+                    },
+                    'body': json.dumps({'message': 'PriceManager API работает'})
+                }
+            elif path.startswith('/api/v1'):
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type'
+                    },
+                    'body': json.dumps({'message': 'API v1 endpoint'})
+                }
+            else:
+                return {
+                    'statusCode': 404,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({'error': 'Not found'})
+                }
+        elif http_method == 'POST':
+            # Обработка POST запросов
+            if path.startswith('/api/v1'):
+                # Здесь обработка конкретных API эндпоинтов
+                # В полной реализации нужно добавить логику для разных endpoint'ов
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                        'Access-Control-Allow-Headers': 'Content-Type'
+                    },
+                    'body': json.dumps({'message': 'POST to API v1'})
+                }
+            else:
+                return {
+                    'statusCode': 404,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    'body': json.dumps({'error': 'Not found'})
+                }
+        elif http_method == 'OPTIONS':
+            # Обработка OPTIONS запросов для CORS
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type'
+                },
+                'body': ''
+            }
+        else:
+            # Обработка неподдерживаемых методов
+            return {
+                'statusCode': 405,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({'error': 'Method not allowed'})
+            }
+    except Exception as e:
+        # Обработка любых исключений
+        logger.error(f"Ошибка при обработке запроса: {str(e)}")
+        logger.error(f"Трассировка: {traceback.format_exc()}")
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({'error': f'Internal server error: {str(e)}'})
+        }
