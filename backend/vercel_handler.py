@@ -1323,14 +1323,20 @@ class handler(BaseHTTPRequestHandler):
                             price = item.get('new_price', 0)
                             content += f"{article},{name},{price}\n"
                         
-                        # Сохраняем файл локально для тестирования
-                        test_dir = os.path.join(os.getcwd(), 'test_files')
-                        os.makedirs(test_dir, exist_ok=True)
-                        test_file_path = os.path.join(test_dir, result_filename)
-                        
-                        with open(test_file_path, 'w', encoding='utf-8') as f:
-                            f.write(content)
-                        logger.info(f"[SAVE] Тестовый файл сохранен локально: {test_file_path}")
+                        # Пытаемся сохранить файл локально только если это возможно
+                        try:
+                            test_dir = os.path.join(os.getcwd(), 'test_files')
+                            os.makedirs(test_dir, exist_ok=True)
+                            test_file_path = os.path.join(test_dir, result_filename)
+                            
+                            with open(test_file_path, 'w', encoding='utf-8') as f:
+                                f.write(content)
+                            logger.info(f"[SAVE] Тестовый файл сохранен локально: {test_file_path}")
+                        except OSError as e:
+                            # Ожидаемая ошибка в Vercel - файловая система доступна только для чтения
+                            logger.info(f"[SAVE] Не удалось сохранить файл локально (ожидаемо в Vercel): {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"[SAVE] Не удалось сохранить файл локально: {str(e)}")
                         
                         # Добавляем в кеш для возможности скачивания
                         if not hasattr(get_file_content, 'file_cache'):
@@ -1459,13 +1465,19 @@ class handler(BaseHTTPRequestHandler):
                         logger.info(f"[SAVE] Обновленный файл подготовлен, размер: {len(updated_content)} байт")
                         
                         # Сохраняем файл локально
-                        test_dir = os.path.join(os.getcwd(), 'test_files')
-                        os.makedirs(test_dir, exist_ok=True)
-                        test_file_path = os.path.join(test_dir, result_filename)
-                        
-                        with open(test_file_path, 'wb') as f:
-                            f.write(updated_content)
-                        logger.info(f"[SAVE] Обновленный файл сохранен локально: {test_file_path}")
+                        try:
+                            test_dir = os.path.join(os.getcwd(), 'test_files')
+                            os.makedirs(test_dir, exist_ok=True)
+                            test_file_path = os.path.join(test_dir, result_filename)
+                            
+                            with open(test_file_path, 'wb') as f:
+                                f.write(updated_content)
+                            logger.info(f"[SAVE] Обновленный файл сохранен локально: {test_file_path}")
+                        except OSError as e:
+                            # Ожидаемая ошибка в Vercel - файловая система доступна только для чтения
+                            logger.info(f"[SAVE] Не удалось сохранить обновленный файл локально (ожидаемо в Vercel): {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"[SAVE] Не удалось сохранить обновленный файл локально: {str(e)}")
                         
                         # Добавляем в кеш для возможности скачивания
                         if not hasattr(get_file_content, 'file_cache'):
@@ -1524,13 +1536,20 @@ class handler(BaseHTTPRequestHandler):
                             price = item.get('new_price', 0)
                             content += f"{article},{name},{price}\n"
                         
-                        # Сохраняем локально
-                        test_dir = os.path.join(os.getcwd(), 'test_files')
-                        os.makedirs(test_dir, exist_ok=True)
-                        test_file_path = os.path.join(test_dir, result_filename)
-                        
-                        with open(test_file_path, 'w', encoding='utf-8') as f:
-                            f.write(content)
+                        # Пытаемся сохранить локально, но это не критично
+                        try:
+                            test_dir = os.path.join(os.getcwd(), 'test_files')
+                            os.makedirs(test_dir, exist_ok=True)
+                            test_file_path = os.path.join(test_dir, result_filename)
+                            
+                            with open(test_file_path, 'w', encoding='utf-8') as f:
+                                f.write(content)
+                            logger.info(f"[SAVE] Резервный файл сохранен локально: {test_file_path}")
+                        except OSError as e:
+                            # Ожидаемая ошибка в Vercel
+                            logger.info(f"[SAVE] Не удалось сохранить резервный файл локально (ожидаемо в Vercel): {str(e)}")
+                        except Exception as e:
+                            logger.warning(f"[SAVE] Не удалось сохранить резервный файл локально: {str(e)}")
                         
                         # Добавляем в кеш
                         if not hasattr(get_file_content, 'file_cache'):
