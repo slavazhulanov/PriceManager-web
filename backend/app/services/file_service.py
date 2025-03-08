@@ -12,6 +12,7 @@ from app.services.file_cache import cache_file_content, get_cached_content, clea
 import logging
 import traceback
 import httpx
+import csv
 
 logger = logging.getLogger("app.services.file")
 
@@ -128,13 +129,36 @@ async def cleanup_old_files(max_age_days: int = 7):
 
 def detect_encoding(file_content: bytes) -> str:
     """
-    Определение кодировки файла из содержимого
+    Определение кодировки файла
     """
-    logger.info(f"Определение кодировки файла (размер: {len(file_content)} байт)")
-    result = chardet.detect(file_content[:10000])  # Чтение первых 10000 байт для определения кодировки
-    encoding = result['encoding'] or 'utf-8'
-    logger.info(f"Обнаружена кодировка: {encoding} с достоверностью {result.get('confidence', 'неизвестно')}")
-    return encoding
+    if not file_content:
+        return 'utf-8'
+    
+    encodings_to_try = ['utf-8', 'utf-8-sig', 'cp1251', 'latin1', 'iso-8859-1']
+    
+    # Проверка на UTF-8 BOM
+    if file_content.startswith(b'\xef\xbb\xbf'):
+        return 'utf-8-sig'
+    
+    # Проверка каждой кодировки
+    for encoding in encodings_to_try:
+        try:
+            file_content.decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    
+    # Если не удалось определить кодировку, используем chardet
+    try:
+        import chardet
+        result = chardet.detect(file_content)
+        if result['confidence'] > 0.7:
+            return result['encoding']
+    except ImportError:
+        pass
+    
+    # Если ничего не помогло, используем UTF-8 по умолчанию
+    return 'utf-8'
 
 def detect_separator(file_content: bytes, encoding: str) -> str:
     """
@@ -197,70 +221,255 @@ def get_columns(file_content: bytes, extension: str, encoding: str, separator: s
 
 def read_file(file_content: bytes, extension: str, encoding: str, separator: str) -> pd.DataFrame:
     """
-    Чтение файла из содержимого с учетом расширения и кодировки
-    """
-    logger.info(f"Чтение файла (расширение: {extension}, кодировка: {encoding}, разделитель: '{separator}')")
-    try:
-        if extension.lower() in ['.xlsx', '.xls']:
-            # Для Excel-файлов
-            logger.info("Чтение Excel-файла")
-            df = pd.read_excel(io.BytesIO(file_content))
-        elif extension.lower() == '.csv':
-            # Для CSV-файлов
-            logger.info("Чтение CSV-файла")
-            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
-        else:
-            # Пробуем прочитать как CSV
-            logger.warning(f"Неизвестное расширение файла: {extension}, пробуем прочитать как CSV")
-            df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
+    Чтение содержимого файла в pandas DataFrame
+    
+    Args:
+        file_content: Бинарное содержимое файла
+        extension: Расширение файла (.csv, .xlsx и т.д.)
+        encoding: Кодировка файла
+        separator: Разделитель для CSV файлов
         
-        logger.info(f"Файл успешно прочитан, получено {len(df)} строк и {len(df.columns)} колонок")
+    Returns:
+        pd.DataFrame: Данные из файла
+    """
+    logger.info(f"Чтение файла с расширением {extension}, кодировкой {encoding}, разделителем '{separator}'")
+    
+    if not file_content:
+        logger.error("Получено пустое содержимое файла для чтения")
+        raise ValueError("Невозможно прочитать файл: пустое содержимое")
+    
+    try:
+        if extension.lower() in ['.csv', '.txt']:
+            # Для CSV и TXT файлов, пробуем несколько подходов
+            try:
+                # Стандартное чтение CSV
+                df = pd.read_csv(
+                    io.BytesIO(file_content), 
+                    encoding=encoding, 
+                    sep=separator,
+                    engine='python',  # Более гибкий парсер
+                    on_bad_lines='skip',  # Пропускаем строки с ошибками (заменено с error_bad_lines=False)
+                    low_memory=False  # Избегаем предупреждения memory
+                )
+            except Exception as e:
+                logger.warning(f"Ошибка при стандартном чтении CSV: {str(e)}, пробуем альтернативные методы")
+                
+                # Пробуем с более строгими параметрами
+                try:
+                    df = pd.read_csv(
+                        io.BytesIO(file_content), 
+                        encoding=encoding, 
+                        sep=separator,
+                        quoting=csv.QUOTE_NONE,  # Отключаем кавычки
+                        on_bad_lines='skip'  # Заменено с error_bad_lines=False
+                    )
+                except Exception as e2:
+                    logger.warning(f"Вторая попытка чтения CSV не удалась: {str(e2)}")
+                    
+                    # Последняя попытка с декодированием строки
+                    try:
+                        text_content = file_content.decode(encoding, errors='replace')
+                        df = pd.read_csv(
+                            io.StringIO(text_content),
+                            sep=separator,
+                            on_bad_lines='skip'  # Заменено с error_bad_lines=False
+                        )
+                    except Exception as e3:
+                        logger.error(f"Все попытки чтения CSV файла не удались: {str(e3)}")
+                        raise ValueError(f"Не удалось прочитать CSV файл: {str(e3)}")
+        
+        elif extension.lower() in ['.xlsx', '.xls']:
+            # Для Excel файлов
+            try:
+                df = pd.read_excel(io.BytesIO(file_content), engine='openpyxl' if extension.lower() == '.xlsx' else 'xlrd')
+            except Exception as e:
+                logger.error(f"Ошибка при чтении Excel файла: {str(e)}")
+                
+                # Попытка использовать альтернативные движки
+                try:
+                    if extension.lower() == '.xlsx':
+                        logger.info("Попытка использовать xlrd для чтения XLSX")
+                        df = pd.read_excel(io.BytesIO(file_content), engine='xlrd')
+                    else:
+                        logger.info("Попытка использовать openpyxl для чтения XLS")
+                        df = pd.read_excel(io.BytesIO(file_content), engine='openpyxl')
+                except Exception as e2:
+                    logger.error(f"Альтернативные движки для Excel не помогли: {str(e2)}")
+                    raise ValueError(f"Не удалось прочитать Excel файл: {str(e2)}")
+        
+        else:
+            logger.error(f"Неподдерживаемый формат файла: {extension}")
+            raise ValueError(f"Неподдерживаемый формат файла: {extension}")
+        
+        # Проверка на пустой DataFrame
+        if df.empty:
+            logger.warning("Файл прочитан, но данные отсутствуют")
+            raise ValueError("Файл не содержит данных")
+        
+        # Логируем информацию о прочитанных данных
+        logger.info(f"Файл успешно прочитан. Размер: {len(df)} строк, {len(df.columns)} колонок")
+        logger.debug(f"Колонки: {', '.join(df.columns.tolist())}")
+        logger.debug(f"Типы данных: {df.dtypes}")
+        
+        # Предобработка данных - обрезаем пробелы в строковых колонках
+        for col in df.select_dtypes(include=['object']).columns:
+            try:
+                df[col] = df[col].str.strip()
+            except Exception:
+                pass  # Игнорируем ошибки, так как некоторые колонки могут быть не строками
+        
         return df
+        
     except Exception as e:
         logger.error(f"Ошибка при чтении файла: {str(e)}")
-        logger.debug(traceback.format_exc())
+        logger.error(f"Полная ошибка: {traceback.format_exc()}")
         raise ValueError(f"Не удалось прочитать файл: {str(e)}")
 
 def save_file(filename: str, file_content: bytes) -> str:
     """
-    Сохранение файла в хранилище Supabase
+    Сохранение файла в Supabase Storage
     
-    Возвращает URL к сохраненному файлу
+    Args:
+        filename: Имя файла
+        file_content: Содержимое файла
+        
+    Returns:
+        URL файла в Supabase
     """
-    logger.info(f"Сохранение файла: {filename}, размер: {len(file_content)} байт")
+    logger.info(f"Запрос на сохранение файла: {filename}, размер: {len(file_content)} байт")
     
-    # Кешируем содержимое файла в памяти
+    # Очистка имени файла
+    filename = sanitize_filename(filename)
+    
+    # Подключение к Supabase
     try:
-        cache_file_content(filename, file_content)
-        logger.info(f"Файл {filename} успешно кеширован в памяти")
-    except Exception as e:
-        logger.error(f"Ошибка при кешировании файла {filename}: {str(e)}")
-    
-    # Получаем существующий клиент или создаем новый
-    client = init_supabase_client()
-    if not client:
-        raise ValueError("Не удалось инициализировать Supabase клиент для сохранения файла")
-    
-    try:
-        # Формируем путь к файлу в Supabase
-        file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
-        logger.info(f"Сохранение в Supabase Storage: {file_path}")
+        # Проверка конфигурации Supabase
+        if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+            logger.warning("Настройки для Supabase не найдены, сохранение в локальное хранилище")
+            return save_file_locally(filename, file_content)
         
-        # Загружаем файл в Supabase
-        client.storage.from_(settings.SUPABASE_BUCKET).upload(
-            file_path,
-            file_content,
-            {"content-type": "application/octet-stream"}
-        )
+        # Получаем существующий клиент или создаем новый
+        client = init_supabase_client()
+        if not client:
+            logger.warning("Не удалось инициализировать Supabase клиент, сохранение в локальное хранилище")
+            return save_file_locally(filename, file_content)
         
-        # Получаем публичный URL
-        cloud_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
-        logger.info(f"Файл успешно загружен в Supabase, URL: {cloud_url}")
-        return cloud_url
+        try:
+            # Формируем путь к файлу в Supabase
+            file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
+            logger.info(f"Сохранение в Supabase Storage: {file_path}")
+            
+            # Проверка содержимого на вредоносный код (базовая проверка)
+            if len(file_content) > 0 and is_potentially_dangerous(file_content[:4096]):
+                logger.warning(f"Обнаружено потенциально опасное содержимое в файле {filename}")
+                raise ValueError("Обнаружено потенциально опасное содержимое в файле")
+            
+            # Загружаем файл в Supabase
+            client.storage.from_(settings.SUPABASE_BUCKET).upload(
+                file_path,
+                file_content,
+                {"content-type": "application/octet-stream"}
+            )
+            
+            # Получаем публичный URL
+            cloud_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
+            logger.info(f"Файл успешно загружен в Supabase, URL: {cloud_url}")
+            return cloud_url
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
+            logger.error(f"Полная ошибка: {traceback.format_exc()}")
+            
+            # В случае ошибки пытаемся сохранить в локальное хранилище
+            logger.info("Пытаемся сохранить файл в локальное хранилище")
+            return save_file_locally(filename, file_content)
     except Exception as e:
-        logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
+        logger.error(f"Критическая ошибка при сохранении файла: {str(e)}")
         logger.error(f"Полная ошибка: {traceback.format_exc()}")
-        raise ValueError(f"Не удалось сохранить файл в Supabase: {str(e)}")
+        raise ValueError(f"Не удалось сохранить файл: {str(e)}")
+
+def save_file_locally(filename: str, file_content: bytes) -> str:
+    """
+    Сохранение файла в локальное хранилище
+    """
+    try:
+        # Создаем директорию, если не существует
+        uploads_dir = os.path.join(settings.UPLOADS_DIR)
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Полный путь к файлу
+        file_path = os.path.join(uploads_dir, filename)
+        
+        # Записываем содержимое в файл
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+        
+        logger.info(f"Файл успешно сохранен локально: {file_path}")
+        
+        # Возвращаем относительный путь для доступа через API
+        return f"/api/v1/files/download/{filename}"
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении файла локально: {str(e)}")
+        logger.error(f"Полная ошибка: {traceback.format_exc()}")
+        raise ValueError(f"Не удалось сохранить файл локально: {str(e)}")
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Очистка имени файла от потенциально опасных символов
+    """
+    # Удаляем недопустимые символы в имени файла
+    import re
+    
+    # Получаем расширение файла
+    base, ext = os.path.splitext(filename)
+    
+    # Очищаем базовое имя от спецсимволов, оставляя только буквы, цифры, - и _
+    base = re.sub(r'[^\w\-_]', '', base)
+    
+    # Ограничиваем длину имени
+    if len(base) > 50:
+        base = base[:50]
+    
+    # Собираем имя файла
+    safe_filename = f"{base}{ext}"
+    
+    if safe_filename != filename:
+        logger.info(f"Имя файла очищено: '{filename}' -> '{safe_filename}'")
+    
+    return safe_filename
+
+def is_potentially_dangerous(content_sample: bytes) -> bool:
+    """
+    Базовая проверка содержимого файла на потенциально опасный код
+    """
+    try:
+        # Проверка на наличие исполняемых заголовков
+        executable_headers = [
+            b'MZ',       # Windows PE
+            b'\x7fELF',  # ELF (Linux)
+            b'\xca\xfe\xba\xbe',  # Java class
+            b'\xCF\xFA\xED\xFE',  # Mach-O binary (macOS)
+        ]
+        
+        for header in executable_headers:
+            if content_sample.startswith(header):
+                return True
+        
+        # Проверка на наличие потенциально опасных скриптовых фрагментов
+        dangerous_patterns = [
+            b'<script', b'eval(', b'exec(',
+            b'Runtime.getRuntime().exec',
+            b'ProcessBuilder',
+            b'os.system'
+        ]
+        
+        for pattern in dangerous_patterns:
+            if pattern in content_sample.lower():
+                return True
+        
+        return False
+    except Exception:
+        # В случае ошибки считаем безопасным, чтобы не блокировать работу
+        return False
 
 def get_file_content(filename: str) -> Optional[bytes]:
     """

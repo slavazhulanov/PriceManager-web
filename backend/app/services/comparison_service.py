@@ -140,33 +140,45 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
     missing_in_store = []
     missing_in_supplier = []
     
+    # Создаем словарь артикулов магазина для быстрого поиска
+    logger.info("Создание словаря артикулов магазина для оптимизации поиска")
+    store_articles_dict = {}
+    for _, store_row in store_df.iterrows():
+        store_article = store_row[store_article_col]
+        store_articles_dict[store_article] = store_row
+    
     # Поиск совпадающих артикулов
     logger.info("Начало сопоставления товаров по артикулам")
     
     match_count = 0
     missing_in_store_count = 0
     
-    for idx, supplier_row in enumerate(supplier_df.iterrows()):
+    for idx, (_, supplier_row_data) in enumerate(supplier_df.iterrows()):
         if idx % 1000 == 0 and idx > 0:
             logger.info(f"Обработано {idx} товаров поставщика. Найдено совпадений: {match_count}, отсутствуют в магазине: {missing_in_store_count}")
         
-        _, supplier_row_data = supplier_row
         supplier_article = supplier_row_data[supplier_article_col]
         supplier_price = supplier_row_data[supplier_price_col]
         supplier_name = supplier_row_data.get(supplier_name_col) if supplier_name_col else None
         
-        # Поиск соответствующего артикула в магазине
-        store_matches = store_df[store_df[store_article_col] == supplier_article]
-        
-        if not store_matches.empty:
-            store_row = store_matches.iloc[0]
+        # Проверка наличия артикула в словаре магазина
+        if supplier_article in store_articles_dict:
+            store_row = store_articles_dict[supplier_article]
             store_price = store_row[store_price_col]
             store_name = store_row.get(store_name_col) if store_name_col else None
             
             # Проверка на числовые значения цен
             try:
-                supplier_price_float = float(supplier_price)
-                store_price_float = float(store_price)
+                # Очистка и преобразование строк цен в числа
+                supplier_price_str = str(supplier_price).replace(',', '.').strip()
+                store_price_str = str(store_price).replace(',', '.').strip()
+                
+                # Удаление нечисловых символов (кроме точки)
+                supplier_price_str = ''.join(c for c in supplier_price_str if c.isdigit() or c == '.')
+                store_price_str = ''.join(c for c in store_price_str if c.isdigit() or c == '.')
+                
+                supplier_price_float = float(supplier_price_str)
+                store_price_float = float(store_price_str)
                 
                 price_diff = supplier_price_float - store_price_float
                 
@@ -174,8 +186,12 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
                 if store_price_float != 0:
                     price_diff_percent = price_diff / store_price_float * 100
                 else:
-                    price_diff_percent = 0
-                    logger.warning(f"Нулевая цена в магазине для артикула {supplier_article}, процентная разница установлена в 0")
+                    # Если цена в магазине равна нулю, но цена поставщика не нулевая
+                    if supplier_price_float > 0:
+                        price_diff_percent = 100  # 100% разница (считаем как полное увеличение)
+                    else:
+                        price_diff_percent = 0
+                    logger.warning(f"Нулевая цена в магазине для артикула {supplier_article}, процентная разница установлена в {price_diff_percent}")
                 
                 matches.append({
                     "article": supplier_article,
@@ -194,7 +210,7 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
             try:
                 missing_in_store.append({
                     "article": supplier_article,
-                    "supplier_price": float(supplier_price),
+                    "supplier_price": float(str(supplier_price).replace(',', '.').strip()),
                     "supplier_name": supplier_name,
                 })
                 missing_in_store_count += 1
@@ -207,23 +223,24 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
     missing_in_supplier_count = 0
     logger.info("Поиск товаров, отсутствующих у поставщика")
     
-    for idx, store_row in enumerate(store_df.iterrows()):
+    # Создаем словарь артикулов поставщика для быстрого поиска
+    supplier_articles_set = set(supplier_df[supplier_article_col].tolist())
+    
+    for idx, (_, store_row_data) in enumerate(store_df.iterrows()):
         if idx % 1000 == 0 and idx > 0:
             logger.info(f"Обработано {idx} товаров магазина. Отсутствуют у поставщика: {missing_in_supplier_count}")
         
-        _, store_row_data = store_row
         store_article = store_row_data[store_article_col]
-        store_price = store_row_data[store_price_col]
-        store_name = store_row_data.get(store_name_col) if store_name_col else None
         
         # Проверка, есть ли артикул у поставщика
-        supplier_matches = supplier_df[supplier_df[supplier_article_col] == store_article]
-        
-        if supplier_matches.empty:
+        if store_article not in supplier_articles_set:
+            store_price = store_row_data[store_price_col]
+            store_name = store_row_data.get(store_name_col) if store_name_col else None
+            
             try:
                 missing_in_supplier.append({
                     "article": store_article,
-                    "store_price": float(store_price),
+                    "store_price": float(str(store_price).replace(',', '.').strip()),
                     "store_name": store_name,
                 })
                 missing_in_supplier_count += 1

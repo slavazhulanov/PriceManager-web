@@ -37,22 +37,45 @@ async def upload_file(
     file_type: FileType = Form(...)
 ):
     """
-    Загрузка файла на сервер
+    Загрузка файла прайс-листа
     """
     try:
+        # Проверка типа файла
+        if file_type not in [FileType.SUPPLIER, FileType.STORE]:
+            logger.error(f"Неверный тип файла: {file_type}")
+            raise HTTPException(status_code=400, detail=f"Неверный тип файла: {file_type}. Допустимые типы: supplier, store")
+        
+        # Проверка расширения файла
+        allowed_extensions = ['.csv', '.xlsx', '.xls', '.txt']
+        file_extension = os.path.splitext(file.filename)[1].lower()
+        
+        if file_extension not in allowed_extensions:
+            logger.error(f"Неподдерживаемый формат файла: {file_extension}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Неподдерживаемый формат файла: {file_extension}. Поддерживаемые форматы: {', '.join(allowed_extensions)}"
+            )
+        
         # Чтение содержимого файла
         contents = await file.read()
         
-        if len(contents) > settings.MAX_UPLOAD_SIZE:
-            logger.error(f"Размер файла превышает допустимый: {len(contents)} > {settings.MAX_UPLOAD_SIZE} байт")
-            raise HTTPException(status_code=400, detail=f"Размер файла превышает {settings.MAX_UPLOAD_SIZE / (1024 * 1024):.1f} МБ")
+        # Проверка размера файла
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 МБ
+        if len(contents) > MAX_FILE_SIZE:
+            logger.error(f"Размер файла превышает допустимый: {len(contents)} > {MAX_FILE_SIZE} байт")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Размер файла превышает допустимый: {len(contents) / (1024 * 1024):.2f} МБ (макс. 10 МБ)"
+            )
             
+        # Сброс позиции файла после чтения
+        await file.seek(0)
+        
         # Логирование получения файла
         logger.info(f"Получен файл для загрузки: {file.filename}, тип: {file_type}, размер: {len(contents)} байт")
         
         # Генерация уникального имени файла для хранения
         timestamp = int(time.time())
-        file_extension = os.path.splitext(file.filename)[1].lower()
         stored_filename = f"file_{timestamp}_{uuid.uuid4().hex[:8]}{file_extension}"
         
         logger.info(f"Сгенерировано имя для сохранения: {stored_filename}")

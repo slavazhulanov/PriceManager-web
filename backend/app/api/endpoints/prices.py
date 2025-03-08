@@ -13,14 +13,20 @@ logger = logging.getLogger("app.api.prices")
 
 @router.post("/update", response_model=List[PriceUpdate])
 async def update_store_prices(
+    request: Request,
     updates: List[PriceUpdate] = Body(...),
     store_file: FileInfo = Body(...)
 ):
     """
     Обновление цен в прайс-листе магазина
     """
+    # Получаем идентификатор запроса
+    request_id = getattr(request.state, "request_id", "unknown")
+    logger.info(f"[{request_id}] Запрос на обновление {len(updates)} цен в файле {store_file.stored_filename}")
+    
     # Проверка типа файла
     if store_file.file_type != "store":
+        logger.error(f"[{request_id}] Указан неверный тип файла: {store_file.file_type}")
         raise HTTPException(
             status_code=400,
             detail="Указан неверный тип файла. Необходимо указать файл магазина"
@@ -28,15 +34,44 @@ async def update_store_prices(
     
     # Проверка наличия сопоставления колонок
     if not store_file.column_mapping:
+        logger.error(f"[{request_id}] Не указано сопоставление колонок для файла {store_file.stored_filename}")
         raise HTTPException(
             status_code=400,
             detail="Не указано сопоставление колонок для файла"
         )
     
-    # Выполнение обновления цен
-    updated_prices = update_prices(updates, store_file)
+    # Проверка корректности обновлений цен
+    invalid_updates = []
+    for i, update in enumerate(updates):
+        if update.new_price <= 0:
+            invalid_updates.append({
+                "index": i,
+                "article": update.article,
+                "new_price": update.new_price,
+                "error": "Новая цена должна быть положительной"
+            })
     
-    return updated_prices
+    if invalid_updates:
+        logger.error(f"[{request_id}] Найдены некорректные обновления цен: {invalid_updates}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Найдены некорректные обновления цен",
+                "invalid_updates": invalid_updates
+            }
+        )
+    
+    # Выполнение обновления цен
+    try:
+        updated_prices = update_prices(updates, store_file)
+        logger.info(f"[{request_id}] Успешно обновлено {len(updated_prices)} цен")
+        return updated_prices
+    except Exception as e:
+        logger.error(f"[{request_id}] Ошибка при обновлении цен: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при обновлении цен: {str(e)}"
+        )
 
 @router.post("/save", response_model=Dict)
 async def save_updated_file(
