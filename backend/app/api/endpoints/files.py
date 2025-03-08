@@ -404,3 +404,143 @@ async def check_supabase_connection():
             "message": f"Ошибка при выполнении диагностики: {str(e)}",
             "traceback": traceback.format_exc()
         } 
+
+@router.get("/mock-test", response_model=Dict[str, Any])
+async def test_mock_files():
+    """
+    Тестовый маршрут для проверки работы с mock-файлами
+    """
+    # Имена файлов из ошибок
+    mock_files = [
+        "mock_1741422920_mock_file.csv",
+        "mock_1741422926_mock_file.csv",
+        "test.csv"
+    ]
+    
+    results = {}
+    
+    for filename in mock_files:
+        # Проверяем, существует ли файл
+        content = get_file_content(filename)
+        results[filename] = {
+            "status": "success" if content else "error",
+            "size": len(content) if content else 0,
+            "preview": content[:100].decode('utf-8') if content else None
+        }
+    
+    return {
+        "results": results,
+        "message": "Проверьте результаты для каждого файла"
+    }
+
+@router.get("/create-mock-files", response_model=Dict[str, Any])
+async def create_mock_files():
+    """
+    Создает мок-файлы для тестирования сравнения
+    """
+    # Определяем содержимое мок-файлов
+    mock_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30"
+    
+    # Имена файлов для создания
+    mock_files = [
+        "mock_test_supplier.csv",
+        "mock_test_store.csv",
+    ]
+    
+    results = {}
+    
+    for filename in mock_files:
+        try:
+            # Сохраняем файл в Supabase
+            saved_filename = save_file(filename, mock_content.encode('utf-8'))
+            
+            # Проверяем, что файл сохранен
+            saved_content = get_file_content(saved_filename)
+            
+            results[filename] = {
+                "status": "success" if saved_content else "error",
+                "saved_as": saved_filename,
+                "size": len(saved_content) if saved_content else 0,
+                "preview": saved_content[:100].decode('utf-8') if saved_content else None
+            }
+        except Exception as e:
+            logger.error(f"Ошибка при создании мок-файла {filename}: {str(e)}")
+            results[filename] = {
+                "status": "error",
+                "error": str(e)
+            }
+    
+    return {
+        "results": results,
+        "message": "Создание мок-файлов завершено"
+    }
+
+@router.get("/prepare-mock-test", response_model=Dict[str, Any])
+async def prepare_mock_test():
+    """
+    Подготовительный маршрут для создания и проверки конкретных мок-файлов
+    с теми же именами, что используются в приложении
+    """
+    # Читаем содержимое тестового файла
+    test_content = None
+    try:
+        client = init_supabase_client()
+        if client:
+            bucket = settings.SUPABASE_BUCKET
+            folder = settings.SUPABASE_FOLDER
+            try:
+                test_content = client.storage.from_(bucket).download(f"{folder}/test.csv")
+                logger.info(f"Успешно получено содержимое test.csv: {len(test_content)} байт")
+            except Exception as e:
+                logger.error(f"Ошибка при получении test.csv: {str(e)}")
+    except Exception as e:
+        logger.error(f"Общая ошибка при получении test.csv: {str(e)}")
+    
+    if not test_content:
+        test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
+        logger.info("Используем стандартный шаблон для тестовых файлов")
+    
+    # Имена файлов из ошибок
+    mock_files = [
+        "mock_1741422920_mock_file.csv",
+        "mock_1741422926_mock_file.csv"
+    ]
+    
+    results = {}
+    
+    # Проверяем и создаем каждый мок-файл
+    for filename in mock_files:
+        # Проверяем, существует ли файл
+        content = get_file_content(filename)
+        
+        if content:
+            results[filename] = {
+                "status": "exists",
+                "size": len(content),
+                "action": "none"
+            }
+        else:
+            # Если файл не существует, создаем его
+            try:
+                # Сохраняем файл в Supabase
+                saved_filename = save_file(filename, test_content)
+                
+                # Проверяем, что файл сохранен
+                saved_content = get_file_content(saved_filename)
+                
+                results[filename] = {
+                    "status": "created",
+                    "saved_as": saved_filename,
+                    "size": len(saved_content) if saved_content else 0
+                }
+            except Exception as e:
+                logger.error(f"Ошибка при создании мок-файла {filename}: {str(e)}")
+                results[filename] = {
+                    "status": "error",
+                    "error": str(e)
+                }
+    
+    return {
+        "results": results,
+        "message": "Подготовка мок-файлов завершена"
+    } 

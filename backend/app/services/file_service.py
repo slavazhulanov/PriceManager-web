@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.services.file_cache import cache_file_content, get_cached_content, clear_old_cache
 import logging
 import traceback
+import httpx
 
 logger = logging.getLogger("app.services.file")
 
@@ -263,67 +264,72 @@ def save_file(filename: str, file_content: bytes) -> str:
 
 def get_file_content(filename: str) -> Optional[bytes]:
     """
-    Получение содержимого файла из хранилища Supabase
-    
-    Возвращает содержимое файла в виде байтов
+    Получение содержимого файла
     """
-    logger.info(f"Запрошено содержимое файла: {filename}")
+    logger.info(f"Запрос содержимого файла: {filename}")
     
-    # Сначала пытаемся получить из кеша
+    # Сначала попробуем получить файл из кеша
     cached_content = get_cached_content(filename)
     if cached_content:
-        logger.info(f"Файл {filename} получен из кеша, размер: {len(cached_content) / 1024:.1f} КБ")
+        logger.info(f"Файл {filename} найден в кеше, размер: {len(cached_content)} байт")
         return cached_content
     
-    # Получаем существующий клиент или создаем новый
-    client = init_supabase_client()
-    if not client:
-        logger.error("Не удалось создать клиент Supabase")
-        return None
-    
     try:
-        # Формируем путь к файлу в Supabase
-        file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
-        logger.info(f"Чтение файла из Supabase Storage: {file_path}")
+        # Инициализация клиента Supabase
+        client = init_supabase_client()
+        if not client:
+            logger.error(f"Не удалось инициализировать клиент Supabase для получения файла {filename}")
+            return None
         
-        # Скачиваем содержимое файла
+        # Полный путь к файлу в Supabase
+        bucket = settings.SUPABASE_BUCKET
+        folder = settings.SUPABASE_FOLDER
+        file_path = f"{folder}/{filename}" if folder else filename
+        
+        logger.info(f"Попытка получения файла из Supabase: бакет={bucket}, путь={file_path}")
+        
         try:
-            content = client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
-            logger.info(f"Файл успешно загружен из Supabase, размер: {len(content) / 1024:.1f} КБ")
+            # Пытаемся получить файл через API
+            logger.debug(f"Скачивание файла через API: {file_path}")
+            response = client.storage.from_(bucket).download(file_path)
+            if response:
+                logger.info(f"Файл {filename} успешно получен через API, размер: {len(response)} байт")
+                # Сохраняем в кеш
+                cache_file_content(filename, response)
+                return response
+            else:
+                logger.warning(f"API вернул пустой ответ для файла {filename}")
+        except Exception as api_error:
+            # Логируем ошибку API
+            logger.error(f"Ошибка при получении файла через API: {str(api_error)}")
+            logger.error(f"Детали ошибки API: {traceback.format_exc()}")
             
-            # Кешируем содержимое
-            cache_file_content(filename, content)
-            return content
-        except Exception as download_error:
-            # Пробуем получить публичный URL и скачать файл напрямую
-            logger.warning(f"Не удалось загрузить файл через API, пробуем через публичный URL: {str(download_error)}")
-            
+            # Попробуем получить через публичный URL
             try:
-                public_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
-                logger.info(f"Получен публичный URL файла: {public_url}")
+                logger.info(f"Попытка получения файла через публичный URL: {filename}")
+                public_url = client.storage.from_(bucket).get_public_url(file_path)
+                logger.debug(f"Публичный URL: {public_url}")
                 
-                import httpx
-                with httpx.Client() as http_client:
+                with httpx.Client(timeout=30.0) as http_client:
                     response = http_client.get(public_url)
                     if response.status_code == 200:
                         content = response.content
-                        logger.info(f"Файл успешно загружен через публичный URL, размер: {len(content) / 1024:.1f} КБ")
-                        
-                        # Кешируем содержимое
+                        logger.info(f"Файл {filename} успешно получен через публичный URL, размер: {len(content)} байт")
+                        # Сохраняем в кеш
                         cache_file_content(filename, content)
                         return content
                     else:
-                        logger.error(f"Ошибка при загрузке файла через публичный URL: HTTP {response.status_code}")
-                        logger.error(f"Ответ сервера: {response.text}")
-                        return None
+                        logger.error(f"Ошибка при получении через публичный URL. Статус: {response.status_code}, тело: {response.text[:200]}")
             except Exception as url_error:
-                logger.error(f"Ошибка при попытке загрузки через публичный URL: {str(url_error)}")
-                logger.error(traceback.format_exc())
-                return None
+                logger.error(f"Ошибка при получении файла через публичный URL: {str(url_error)}")
+                logger.error(f"Детали ошибки URL: {traceback.format_exc()}")
+    
     except Exception as e:
-        logger.error(f"Ошибка при загрузке файла из Supabase: {str(e)}")
-        logger.error(f"Полная ошибка: {traceback.format_exc()}")
-        return None
+        logger.error(f"Ошибка при получении файла {filename}: {str(e)}")
+        logger.error(f"Детали общей ошибки: {traceback.format_exc()}")
+    
+    logger.error(f"Не удалось получить содержимое файла {filename} ни одним из методов")
+    return None
 
 def dataframe_to_bytes(df: pd.DataFrame, extension: str, encoding: str, separator: str) -> bytes:
     """

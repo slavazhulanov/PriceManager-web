@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from typing import List, Dict, Any
 from app.models.file import FileInfo, ComparisonResult
-from app.services.file_service import get_file_content, read_file
+from app.services.file_service import get_file_content, read_file, save_file
 from app.core.config import settings
 import logging
 import traceback
@@ -19,15 +19,51 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
     logger.info(f"Получение содержимого файла поставщика: {supplier_file.stored_filename}")
     supplier_content = get_file_content(supplier_file.stored_filename)
     
+    # Если файл не найден, проверяем, не является ли он мок-файлом
+    if not supplier_content and "mock_" in supplier_file.stored_filename:
+        logger.warning(f"Не удалось получить мок-файл поставщика: {supplier_file.stored_filename}. Попытка создания нового файла.")
+        try:
+            # Создаем базовый пример файла
+            sample_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
+            # Сохраняем файл в Supabase
+            save_file(supplier_file.stored_filename, sample_content)
+            # Повторно пытаемся получить содержимое
+            supplier_content = get_file_content(supplier_file.stored_filename)
+            logger.info(f"Создан и получен мок-файл поставщика: {supplier_file.stored_filename}")
+        except Exception as e:
+            logger.error(f"Не удалось создать мок-файл поставщика: {str(e)}")
+    
     logger.info(f"Получение содержимого файла магазина: {store_file.stored_filename}")
     store_content = get_file_content(store_file.stored_filename)
     
+    # Если файл не найден, проверяем, не является ли он мок-файлом
+    if not store_content and "mock_" in store_file.stored_filename:
+        logger.warning(f"Не удалось получить мок-файл магазина: {store_file.stored_filename}. Попытка создания нового файла.")
+        try:
+            # Создаем базовый пример файла
+            sample_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
+            # Сохраняем файл в Supabase
+            save_file(store_file.stored_filename, sample_content)
+            # Повторно пытаемся получить содержимое
+            store_content = get_file_content(store_file.stored_filename)
+            logger.info(f"Создан и получен мок-файл магазина: {store_file.stored_filename}")
+        except Exception as e:
+            logger.error(f"Не удалось создать мок-файл магазина: {str(e)}")
+    
     if not supplier_content:
-        logger.error(f"ОШИБКА: Не удалось получить содержимое файла поставщика: {supplier_file.stored_filename}")
+        error_msg = f"ОШИБКА: Не удалось получить содержимое файла поставщика: {supplier_file.stored_filename}"
+        logger.error(error_msg)
+        logger.error(f"Оригинальное имя файла: {supplier_file.original_filename}")
+        logger.error(f"URL файла: {supplier_file.file_url}")
+        logger.error(f"Проверьте существование файла в Supabase и политики доступа")
         raise ValueError(f"Не удалось получить содержимое файла поставщика: {supplier_file.original_filename}")
         
     if not store_content:
-        logger.error(f"ОШИБКА: Не удалось получить содержимое файла магазина: {store_file.stored_filename}")
+        error_msg = f"ОШИБКА: Не удалось получить содержимое файла магазина: {store_file.stored_filename}"
+        logger.error(error_msg)
+        logger.error(f"Оригинальное имя файла: {store_file.original_filename}")
+        logger.error(f"URL файла: {store_file.file_url}")
+        logger.error(f"Проверьте существование файла в Supabase и политики доступа")
         raise ValueError(f"Не удалось получить содержимое файла магазина: {store_file.original_filename}")
     
     logger.info(f"Оба файла успешно загружены: {supplier_file.stored_filename} ({len(supplier_content)} байт) и {store_file.stored_filename} ({len(store_content)} байт)")
