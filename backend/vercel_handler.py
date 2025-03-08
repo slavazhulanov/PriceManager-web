@@ -42,12 +42,11 @@ def get_file_content(stored_filename):
             logger.info(f"Файл {stored_filename} найден в кеше, возвращаем из кеша")
             return get_file_content.file_cache[stored_filename]
         
-        # Сначала проверяем Supabase
+        # Работаем ТОЛЬКО с реальными файлами из Supabase - никаких тестовых данных!
         supabase = get_supabase_client()
         if not supabase:
             logger.error("Не удалось инициализировать Supabase клиент")
-            # Проверяем, нужно ли создать демонстрационные данные
-            return generate_demo_data_if_needed(stored_filename)
+            return None
         
         bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
         folder = os.environ.get("SUPABASE_FOLDER", "uploads")
@@ -93,51 +92,14 @@ def get_file_content(stored_filename):
                 except Exception as url_error:
                     logger.error(f"Ошибка при запросе публичного URL: {str(url_error)}")
             
-            # Если файл не найден, проверяем, нужно ли создать демонстрационные данные
-            return generate_demo_data_if_needed(stored_filename)
+            # Файл не найден - никаких резервных тестовых данных!
+            logger.error(f"Файл {stored_filename} не найден в Supabase")
+            return None
             
     except Exception as e:
         logger.error(f"Ошибка при получении файла: {str(e)}")
         traceback.print_exc()
         return None
-
-# Генерирует тестовые данные для файлов, если они нужны для демонстрации
-def generate_demo_data_if_needed(stored_filename):
-    # Если имя файла содержит "upload_" - это пользовательский файл, который мы не можем заменить
-    if "upload_" in stored_filename and not stored_filename.startswith("mock_"):
-        logger.error(f"Файл {stored_filename} не найден в Supabase и не может быть сгенерирован")
-        return None
-    
-    # Определяем, нужно ли создать тестовые данные (для файлов, которые нужны для демонстрации)
-    is_demo_needed = (
-        stored_filename.startswith("mock_") or  # Мок-файлы
-        "supplier" in stored_filename.lower() or # Файлы поставщика
-        "store" in stored_filename.lower() or   # Файлы магазина
-        "comparison" in stored_filename.lower() # Файлы сравнения
-    )
-    
-    if not is_demo_needed:
-        logger.error(f"Файл {stored_filename} не найден и не будет автоматически сгенерирован")
-        return None
-    
-    # Создаем демонстрационные данные
-    logger.info(f"Генерация демонстрационных данных для {stored_filename}")
-    
-    # Определяем тип файла
-    is_supplier = "supplier" in stored_filename.lower() or stored_filename.endswith("1_mock_file.csv") or stored_filename.endswith("3_mock_file.csv")
-    
-    # Генерируем разные данные в зависимости от типа файла
-    if is_supplier:
-        # Данные поставщика
-        demo_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
-    else:
-        # Данные магазина
-        demo_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
-    
-    # Сохраняем в кеш
-    get_file_content.file_cache[stored_filename] = demo_content
-    logger.info(f"Сгенерированы демонстрационные данные: {stored_filename}, размер: {len(demo_content)} байт")
-    return demo_content
 
 # Функция для чтения и анализа файла
 def read_file(file_content, extension, encoding, separator):
