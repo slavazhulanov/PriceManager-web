@@ -124,6 +124,9 @@ const UpdatePricePage: React.FC = () => {
   
   // Обработчик подтверждения обновления цен
   const handleConfirmUpdate = () => {
+    // Закрываем диалог подтверждения
+    setConfirmDialogOpen(false);
+    
     if (!state.storeFile || selectedItems.length === 0) {
       setError('Необходимо выбрать товары для обновления');
       return;
