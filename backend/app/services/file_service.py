@@ -278,7 +278,7 @@ def get_file_content(filename: str) -> Optional[bytes]:
             logger.info(f"Мок-файл {filename} найден в кеше, размер: {len(cached_content)} байт")
             return cached_content
             
-        # Генерируем тестовые данные в зависимости от назначения файла
+        # Генерируем тестовые данные в зависимости от назначения файла 3242
         if "_supplier" in filename or filename.endswith("3_mock_file.csv") or filename.endswith("0_mock_file.csv"):
             # Данные поставщика
             test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
