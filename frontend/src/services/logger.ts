@@ -17,7 +17,9 @@ const loggerApi = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
-  }
+  },
+  // Добавляем таймаут и отключаем повторные попытки
+  timeout: 3000
 });
 
 /**
@@ -57,6 +59,11 @@ let sendInterval: NodeJS.Timeout | null = null;
 
 // Режим разработки или продакшн
 const isDev = process.env.NODE_ENV === 'development';
+
+// Флаг, показывающий, что логирование недоступно
+let loggingUnavailable = false;
+// Счетчик неудачных попыток
+let failedAttempts = 0;
 
 /**
  * Логирование действия пользователя
@@ -153,35 +160,51 @@ export const logPageView = (page: string, referrer: string = '') => {
 
 // Отправка буфера действий на сервер
 const sendBuffer = async () => {
+  // Если буфер пуст или уже идет отправка, ничего не делаем
   if (actionBuffer.length === 0 || isTransmitting) {
     return;
   }
-
+  
+  // Если логирование отключено после множества ошибок, просто очищаем буфер
+  if (loggingUnavailable) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Логирование отключено из-за предыдущих ошибок. Действия не будут отправлены на сервер.');
+    }
+    actionBuffer = [];
+    return;
+  }
+  
   isTransmitting = true;
   const actionsToSend = [...actionBuffer];
   actionBuffer = [];
-
+  
   try {
-    // Добавляем полный путь к API эндпоинту
-    const endpoint = actionsToSend.length === 1 
-      ? `${API_URL}/logs/user-action`
-      : `${API_URL}/logs/user-actions/batch`;
-
+    // Попытка отправки логов
     if (actionsToSend.length === 1) {
-      await loggerApi.post(`/logs/user-action`, actionsToSend[0]);
+      await loggerApi.post('/logs/user-action', actionsToSend[0]);
     } else {
-      await loggerApi.post(`/logs/user-actions/batch`, actionsToSend);
+      await loggerApi.post('/logs/user-actions/batch', actionsToSend);
     }
-    console.debug(`Отправлено ${actionsToSend.length} лог-событий`);
-  } catch (error) {
-    // Восстанавливаем буфер при ошибке
-    actionBuffer = [...actionsToSend, ...actionBuffer];
     
-    // Логируем ошибку только в режиме разработки
+    // Успешная отправка - сбрасываем счетчик неудачных попыток
+    failedAttempts = 0;
+    
     if (process.env.NODE_ENV === 'development') {
-      console.error('Ошибка при отправке логов:', error);
+      console.debug(`Отправлено ${actionsToSend.length} лог-событий`);
+    }
+  } catch (error) {
+    failedAttempts++;
+    
+    // Если много ошибок подряд, отключаем логирование
+    if (failedAttempts > 3) {
+      loggingUnavailable = true;
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Слишком много ошибок при отправке логов. Логирование отключено.');
+      }
     } else {
-      console.warn('Не удалось отправить логи. Это не влияет на работу приложения.');
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`Ошибка при отправке логов (попытка ${failedAttempts}/3):`, error);
+      }
     }
   } finally {
     isTransmitting = false;

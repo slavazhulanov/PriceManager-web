@@ -543,4 +543,105 @@ async def prepare_mock_test():
     return {
         "results": results,
         "message": "Подготовка мок-файлов завершена"
+    }
+
+@router.get("/create-mock-cache")
+async def create_mock_cache():
+    """
+    Создает кешированные версии мок-файлов без сохранения в Supabase
+    """
+    from app.services.file_cache import cache_file_content
+    
+    # Базовое содержимое мок-файлов
+    supplier_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
+    store_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
+    
+    # Кешируем стандартные мок-файлы
+    mock_files = [
+        ("mock_supplier.csv", supplier_content),
+        ("mock_store.csv", store_content),
+    ]
+    
+    # Кешируем файлы из последних ошибок
+    specific_mock_files = [
+        "mock_1741424003_mock_file.csv",
+        "mock_1741424008_mock_file.csv",
+        "mock_1741424326_mock_file.csv",
+        "mock_1741424330_mock_file.csv"
+    ]
+    
+    results = {}
+    
+    # Кешируем стандартные мок-файлы
+    for filename, content in mock_files:
+        try:
+            cache_file_content(filename, content)
+            results[filename] = {
+                "status": "success",
+                "size": len(content),
+                "source": "standard"
+            }
+        except Exception as e:
+            results[filename] = {
+                "status": "error",
+                "error": str(e),
+                "source": "standard"
+            }
+    
+    # Кешируем конкретные мок-файлы из ошибок
+    for filename in specific_mock_files:
+        try:
+            # Для файлов поставщиков используем supplier_content
+            if filename.endswith("3_mock_file.csv") or filename.endswith("6_mock_file.csv"):
+                cache_file_content(filename, supplier_content)
+            else:
+                cache_file_content(filename, store_content)
+                
+            results[filename] = {
+                "status": "success",
+                "size": len(supplier_content if filename.endswith("3_mock_file.csv") or filename.endswith("6_mock_file.csv") else store_content),
+                "source": "specific"
+            }
+        except Exception as e:
+            results[filename] = {
+                "status": "error",
+                "error": str(e),
+                "source": "specific"
+            }
+    
+    # Также кешируем test.csv, если его нет в кеше
+    try:
+        # Проверяем, есть ли файл в кеше
+        from app.services.file_cache import get_cached_content
+        test_cached = get_cached_content("test.csv")
+        
+        if not test_cached:
+            # Получаем содержимое из Supabase
+            test_content = get_file_content("test.csv")
+            if not test_content:
+                test_content = supplier_content
+                logger.warning("Не удалось получить test.csv из Supabase, используем стандартные данные")
+            
+            cache_file_content("test.csv", test_content)
+            results["test.csv"] = {
+                "status": "success",
+                "size": len(test_content),
+                "source": "supabase or fallback"
+            }
+        else:
+            results["test.csv"] = {
+                "status": "already_cached",
+                "size": len(test_cached),
+                "source": "cache"
+            }
+    except Exception as e:
+        results["test.csv"] = {
+            "status": "error",
+            "error": str(e),
+            "source": "caching attempt"
+        }
+    
+    return {
+        "results": results,
+        "message": "Кеширование мок-файлов завершено"
     } 

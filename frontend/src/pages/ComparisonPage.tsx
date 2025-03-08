@@ -247,6 +247,22 @@ const ComparisonPage: React.FC = () => {
           store_file: state.storeFile,
         });
 
+        // Проверяем, есть ли слово "mock" в имени файла
+        const hasMockFiles = 
+          state.supplierFile.stored_filename.includes('mock') || 
+          state.storeFile.stored_filename.includes('mock');
+
+        // Если это мок-файлы, предварительно создаем их в кеше
+        if (hasMockFiles) {
+          try {
+            console.log('Подготовка мок-данных в кеше');
+            await fetch(`${window.location.origin}/api/v1/files/create-mock-cache`);
+            console.log('Мок-данные подготовлены');
+          } catch (cacheError) {
+            console.warn('Ошибка при подготовке мок-данных:', cacheError);
+          }
+        }
+
         const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
         console.log('Результат сравнения:', result);
 
