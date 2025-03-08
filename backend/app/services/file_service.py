@@ -268,32 +268,36 @@ def get_file_content(filename: str) -> Optional[bytes]:
     """
     logger.info(f"Запрос содержимого файла: {filename}")
     
-    # Перенаправление mock-файлов на test.csv
+    # Возвращаем готовые тестовые данные для mock-файлов
+    # Это сокращает время обработки запроса и исключает обращение к Supabase
     if "mock_" in filename:
-        logger.info(f"Запрошен мок-файл: {filename}, перенаправляем на test.csv")
-        redirect_filename = "test.csv"
-        # Сначала проверяем кеш для оригинального имени
+        logger.info(f"Генерация тестовых данных для мок-файла: {filename}")
+        # Проверяем кеш для оригинального имени
         cached_content = get_cached_content(filename)
         if cached_content:
             logger.info(f"Мок-файл {filename} найден в кеше, размер: {len(cached_content)} байт")
             return cached_content
-        # Иначе пробуем получить тестовый файл
-        test_content = get_cached_content(redirect_filename)
-        if test_content:
-            logger.info(f"Используем содержимое файла {redirect_filename} вместо {filename}")
-            # Кешируем с оригинальным именем, чтобы в следующий раз быстрее получить
-            cache_file_content(filename, test_content)
-            return test_content
-        # Продолжаем выполнение для test.csv
-        filename = redirect_filename
-        logger.info(f"Продолжаем получение {filename} из Supabase")
+            
+        # Генерируем тестовые данные в зависимости от назначения файла
+        if "_supplier" in filename or filename.endswith("3_mock_file.csv") or filename.endswith("0_mock_file.csv"):
+            # Данные поставщика
+            test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
+        else:
+            # Данные магазина
+            test_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
+            
+        # Сохраняем в кеш для следующих запросов
+        cache_file_content(filename, test_content)
+        logger.info(f"Сгенерированы и закешированы данные для мок-файла {filename}, размер: {len(test_content)} байт")
+        return test_content
     
-    # Сначала попробуем получить файл из кеша
+    # Для не-мок файлов пробуем получить из кеша
     cached_content = get_cached_content(filename)
     if cached_content:
         logger.info(f"Файл {filename} найден в кеше, размер: {len(cached_content)} байт")
         return cached_content
     
+    # Попытка получить из Supabase
     try:
         # Инициализация клиента Supabase
         client = init_supabase_client()
@@ -307,6 +311,10 @@ def get_file_content(filename: str) -> Optional[bytes]:
         file_path = f"{folder}/{filename}" if folder else filename
         
         logger.info(f"Попытка получения файла из Supabase: бакет={bucket}, путь={file_path}")
+        
+        # На Vercel ограничиваем время выполнения запроса для избежания таймаута
+        is_vercel = os.environ.get("VERCEL") == "1"
+        timeout = 5.0 if is_vercel else 30.0
         
         try:
             # Пытаемся получить файл через API
@@ -324,12 +332,10 @@ def get_file_content(filename: str) -> Optional[bytes]:
             logger.error(f"Ошибка при получении файла через API: {str(api_error)}")
             logger.error(f"Детали ошибки API: {traceback.format_exc()}")
             
-            # Если файл недоступен и это mock-файл, создаем стандартный тестовый файл
-            if "mock_" in filename:
-                logger.info(f"Создаем тестовый контент для мок-файла {filename}")
-                test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-                cache_file_content(filename, test_content)
-                return test_content
+            if is_vercel:
+                # На Vercel не пытаемся использовать публичный URL из-за времени выполнения
+                logger.warning(f"Vercel среда: пропускаем попытку доступа через публичный URL для {filename}")
+                return None
             
             # Попробуем получить через публичный URL
             try:
@@ -337,7 +343,7 @@ def get_file_content(filename: str) -> Optional[bytes]:
                 public_url = client.storage.from_(bucket).get_public_url(file_path)
                 logger.debug(f"Публичный URL: {public_url}")
                 
-                with httpx.Client(timeout=30.0) as http_client:
+                with httpx.Client(timeout=timeout) as http_client:
                     response = http_client.get(public_url)
                     if response.status_code == 200:
                         content = response.content
@@ -354,11 +360,11 @@ def get_file_content(filename: str) -> Optional[bytes]:
     except Exception as e:
         logger.error(f"Ошибка при получении файла {filename}: {str(e)}")
         logger.error(f"Детали общей ошибки: {traceback.format_exc()}")
-
-    # Создаем тестовый контент для mock-файлов, если все методы загрузки не сработали
-    if "mock_" in filename:
-        logger.info(f"Все методы загрузки не сработали, возвращаем тестовый контент для мок-файла {filename}")
-        test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
+    
+    # Если test.csv не найден, возвращаем базовые тестовые данные
+    if filename == "test.csv":
+        logger.warning(f"test.csv не найден, возвращаем базовые тестовые данные")
+        test_content = "column1,column2,column3\nvalue1,value2,value3\n".encode('utf-8')
         cache_file_content(filename, test_content)
         return test_content
     

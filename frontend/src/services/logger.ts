@@ -65,6 +65,15 @@ let loggingUnavailable = false;
 // Счетчик неудачных попыток
 let failedAttempts = 0;
 
+// Определяем, работаем ли мы на Vercel
+const isVercel = () => {
+  return window.location.hostname.includes('vercel.app') || 
+         window.location.hostname.includes('now.sh');
+};
+
+// Флаг, показывающий что мы находимся в Vercel и логирование отключено
+const isVercelEnv = isVercel();
+
 /**
  * Логирование действия пользователя
  */
@@ -162,6 +171,15 @@ export const logPageView = (page: string, referrer: string = '') => {
 const sendBuffer = async () => {
   // Если буфер пуст или уже идет отправка, ничего не делаем
   if (actionBuffer.length === 0 || isTransmitting) {
+    return;
+  }
+  
+  // Если мы на Vercel, просто очищаем буфер и не отправляем логи
+  if (isVercelEnv) {
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[Logger] Vercel среда: ${actionBuffer.length} действий НЕ отправлены на сервер`);
+    }
+    actionBuffer = [];
     return;
   }
   

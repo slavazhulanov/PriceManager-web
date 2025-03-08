@@ -252,8 +252,12 @@ const ComparisonPage: React.FC = () => {
           state.supplierFile.stored_filename.includes('mock') || 
           state.storeFile.stored_filename.includes('mock');
 
-        // Если это мок-файлы, предварительно создаем их в кеше
-        if (hasMockFiles) {
+        // Определяем, работаем ли мы на Vercel
+        const isVercelEnv = window.location.hostname.includes('vercel.app') || 
+                          window.location.hostname.includes('now.sh');
+
+        // Если это мок-файлы и мы не на Vercel, предварительно создаем их в кеше
+        if (hasMockFiles && !isVercelEnv) {
           try {
             console.log('Подготовка мок-данных в кеше');
             await fetch(`${window.location.origin}/api/v1/files/create-mock-cache`);
@@ -261,6 +265,8 @@ const ComparisonPage: React.FC = () => {
           } catch (cacheError) {
             console.warn('Ошибка при подготовке мок-данных:', cacheError);
           }
+        } else if (hasMockFiles && isVercelEnv) {
+          console.log('Vercel среда: пропускаем создание мок-данных (будут созданы автоматически)');
         }
 
         const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
