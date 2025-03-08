@@ -153,39 +153,35 @@ export const logPageView = (page: string, referrer: string = '') => {
 
 // Отправка буфера действий на сервер
 const sendBuffer = async () => {
-  if (actionBuffer.length === 0 || isTransmitting) return;
-  
-  // Предотвращаем параллельные отправки
+  if (actionBuffer.length === 0 || isTransmitting) {
+    return;
+  }
+
   isTransmitting = true;
-  
+  const actionsToSend = [...actionBuffer];
+  actionBuffer = [];
+
   try {
-    // Копируем буфер и очищаем оригинал
-    const actionsToSend = [...actionBuffer];
-    actionBuffer = [];
+    // Добавляем полный путь к API эндпоинту
+    const endpoint = actionsToSend.length === 1 
+      ? `${API_URL}/logs/user-action`
+      : `${API_URL}/logs/user-actions/batch`;
+
+    if (actionsToSend.length === 1) {
+      await loggerApi.post(`/logs/user-action`, actionsToSend[0]);
+    } else {
+      await loggerApi.post(`/logs/user-actions/batch`, actionsToSend);
+    }
+    console.debug(`Отправлено ${actionsToSend.length} лог-событий`);
+  } catch (error) {
+    // Восстанавливаем буфер при ошибке
+    actionBuffer = [...actionsToSend, ...actionBuffer];
     
-    // Отправляем данные на сервер
-    try {
-      const endpoint = actionsToSend.length === 1 ? 'logs/user-action' : 'logs/user-actions/batch';
-      const payload = actionsToSend.length === 1 ? actionsToSend[0] : actionsToSend;
-      
-      await loggerApi.post(endpoint, payload);
-      
-      if (isDev) {
-        console.log(`[UserAction] Отправлено ${actionsToSend.length} действий на сервер`);
-      }
-    } catch (error) {
-      // В продакшене просто логируем ошибку в консоль, без повторной отправки
-      console.warn('Ошибка отправки логов на сервер:', error);
-      
-      // В режиме разработки выводим детали ошибки
-      if (process.env.NODE_ENV === 'development') {
-        console.error('Детальная информация об ошибке логирования:', error);
-      }
-      
-      // Не возвращаем действия обратно в буфер, чтобы избежать зацикливания при постоянных ошибках
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('Данные логирования не будут отправлены на сервер. Это не влияет на основную функциональность приложения.');
-      }
+    // Логируем ошибку только в режиме разработки
+    if (process.env.NODE_ENV === 'development') {
+      console.error('Ошибка при отправке логов:', error);
+    } else {
+      console.warn('Не удалось отправить логи. Это не влияет на работу приложения.');
     }
   } finally {
     isTransmitting = false;
