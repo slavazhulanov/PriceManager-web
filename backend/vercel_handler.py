@@ -41,13 +41,10 @@ def get_file_content(stored_filename):
             logger.info(f"Файл {stored_filename} найден в кеше, возвращаем из кеша")
             return get_file_content.file_cache[stored_filename]
         
-        # Для всех файлов сначала пытаемся получить их из Supabase
+        # Для всех файлов обращаемся только к Supabase - больше никаких тестовых данных!
         supabase = get_supabase_client()
         if not supabase:
             logger.error("Не удалось инициализировать Supabase клиент")
-            # Если это мок-файл, вернем тестовые данные
-            if "mock_" in stored_filename:
-                return generate_mock_data(stored_filename)
             return None
         
         bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
@@ -93,11 +90,6 @@ def get_file_content(stored_filename):
                         logger.error(f"Ошибка при запросе публичного URL: {response.status_code}")
                 except Exception as url_error:
                     logger.error(f"Ошибка при запросе публичного URL: {str(url_error)}")
-            
-            # Если это мок-файл и не удалось получить из Supabase, генерируем тестовые данные
-            if "mock_" in stored_filename:
-                logger.info(f"Файл не найден в Supabase, генерируем тестовые данные для {stored_filename}")
-                return generate_mock_data(stored_filename)
                 
             return None
     except Exception as e:
@@ -532,21 +524,4 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        self.wfile.write(''.encode())
-
-# Вспомогательная функция для генерации тестовых данных
-def generate_mock_data(stored_filename):
-    logger.info(f"Генерация тестовых данных для мок-файла: {stored_filename}")
-    
-    # Генерируем разные данные в зависимости от назначения файла
-    if "_supplier" in stored_filename or any(stored_filename.endswith(x) for x in ["1_mock_file.csv", "3_mock_file.csv", "5_mock_file.csv", "7_mock_file.csv", "9_mock_file.csv"]):
-        # Данные поставщика
-        test_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
-    else:
-        # Данные магазина
-        test_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
-        
-    # Сохраняем в кеш для последующих запросов
-    get_file_content.file_cache[stored_filename] = test_content
-    logger.info(f"Сгенерированы тестовые данные для мок-файла: {stored_filename}, размер: {len(test_content)} байт")
-    return test_content 
+        self.wfile.write(''.encode()) 
