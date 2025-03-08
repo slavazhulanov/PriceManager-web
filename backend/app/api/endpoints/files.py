@@ -5,6 +5,7 @@ import pandas as pd
 import chardet
 import httpx
 import traceback
+import time
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks, Request, Response
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
@@ -50,22 +51,45 @@ async def upload_file(
         logger.info(f"Получен файл для загрузки: {file.filename}, тип: {file_type}, размер: {len(contents)} байт")
         
         # Генерация уникального имени файла для хранения
+        timestamp = int(time.time())
         file_extension = os.path.splitext(file.filename)[1].lower()
-        stored_filename = f"{str(uuid.uuid4())}{file_extension}"
+        stored_filename = f"file_{timestamp}_{uuid.uuid4().hex[:8]}{file_extension}"
         
         logger.info(f"Сгенерировано имя для сохранения: {stored_filename}")
         
-        # Сохранение файла в хранилище
-        file_url = save_file(stored_filename, contents)
+        # Кешируем содержимое перед сохранением в Supabase
+        cache_file_content(stored_filename, contents)
+        logger.info(f"Содержимое файла закешировано: {stored_filename}")
+        
+        # Пробуем сохранить файл в Supabase
+        try:
+            file_url = save_file(stored_filename, contents)
+            logger.info(f"Файл успешно сохранен в Supabase: {stored_filename}")
+        except Exception as storage_error:
+            logger.error(f"Ошибка при сохранении файла в Supabase: {str(storage_error)}")
+            logger.error(traceback.format_exc())
+            
+            # Возвращаем ошибку клиенту
+            raise HTTPException(
+                status_code=500, 
+                detail="Не удалось сохранить файл в облачном хранилище. Проверьте настройки Supabase и права доступа."
+            )
         
         # Проверяем, что файл успешно сохранен
-        check_content = get_file_content(stored_filename)
-        if not check_content:
-            logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: Файл был сохранен, но не может быть прочитан: {stored_filename}")
-            raise HTTPException(status_code=500, detail="Не удалось сохранить файл")
-        
-        logger.info(f"Файл успешно сохранен и доступен для чтения")
+        try:
+            check_content = get_file_content(stored_filename)
+            if not check_content:
+                logger.error(f"КРИТИЧЕСКАЯ ОШИБКА: Файл был сохранен, но не может быть прочитан: {stored_filename}")
+                raise HTTPException(status_code=500, detail="Не удалось сохранить файл")
             
+            logger.info(f"Файл успешно сохранен и доступен для чтения")
+        except Exception as read_error:
+            logger.error(f"Ошибка при проверке доступности файла: {str(read_error)}")
+            logger.error(traceback.format_exc())
+            
+            # Используем кешированное содержимое
+            logger.info(f"Используем файл из кеша: {stored_filename}")
+        
         # Определение кодировки и разделителя
         encoding = detect_encoding(contents)
         separator = detect_separator(contents, encoding)
@@ -86,6 +110,9 @@ async def upload_file(
         logger.info(f"Создан объект FileInfo: {file_info.model_dump_json()}")
         
         return file_info
+    except HTTPException as he:
+        # Пробрасываем HTTP-исключения
+        raise he
     except Exception as e:
         logger.error(f"Ошибка при загрузке файла: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ошибка при загрузке файла: {str(e)}")

@@ -50,12 +50,10 @@ export interface UserAction {
   timestamp?: string;
 }
 
-/**
- * Буфер для накопления логов
- */
-const actionBuffer: UserAction[] = [];
-let bufferTimeoutId: NodeJS.Timeout | null = null;
+// Буфер для накопления действий перед отправкой
+let actionBuffer: UserAction[] = [];
 let isTransmitting = false;
+let sendInterval: NodeJS.Timeout | null = null;
 
 // Режим разработки или продакшн
 const isDev = process.env.NODE_ENV === 'development';
@@ -153,37 +151,42 @@ export const logPageView = (page: string, referrer: string = '') => {
   logUserAction(UserActionType.PAGE_VIEW, 'page', page, { referrer });
 };
 
-/**
- * Отправка буфера логов на сервер
- */
+// Отправка буфера действий на сервер
 const sendBuffer = async () => {
   if (actionBuffer.length === 0 || isTransmitting) return;
   
   // Предотвращаем параллельные отправки
   isTransmitting = true;
   
-  // Копируем буфер и очищаем оригинал
-  const actionsToSend = [...actionBuffer];
-  actionBuffer.length = 0;
-  
   try {
+    // Копируем буфер и очищаем оригинал
+    const actionsToSend = [...actionBuffer];
+    actionBuffer = [];
+    
     // Отправляем данные на сервер
-    const endpoint = actionsToSend.length === 1 ? 'logs/user-action' : 'logs/user-actions/batch';
-    const payload = actionsToSend.length === 1 ? actionsToSend[0] : actionsToSend;
-    
-    await loggerApi.post(endpoint, payload);
-    
-    if (isDev) {
-      console.log(`[UserAction] Отправлено ${actionsToSend.length} действий на сервер`);
+    try {
+      const endpoint = actionsToSend.length === 1 ? 'logs/user-action' : 'logs/user-actions/batch';
+      const payload = actionsToSend.length === 1 ? actionsToSend[0] : actionsToSend;
+      
+      await loggerApi.post(endpoint, payload);
+      
+      if (isDev) {
+        console.log(`[UserAction] Отправлено ${actionsToSend.length} действий на сервер`);
+      }
+    } catch (error) {
+      // В продакшене просто логируем ошибку в консоль, без повторной отправки
+      console.warn('Ошибка отправки логов на сервер:', error);
+      
+      // В режиме разработки выводим детали ошибки
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Детальная информация об ошибке логирования:', error);
+      }
+      
+      // Не возвращаем действия обратно в буфер, чтобы избежать зацикливания при постоянных ошибках
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('Данные логирования не будут отправлены на сервер. Это не влияет на основную функциональность приложения.');
+      }
     }
-  } catch (error) {
-    console.error('[UserAction] Ошибка при отправке логов:', error);
-    
-    // В случае ошибки возвращаем действия обратно в буфер
-    actionBuffer.push(...actionsToSend);
-    
-    // Пробуем отправить позже
-    setTimeout(scheduleBufferSend, 5000);
   } finally {
     isTransmitting = false;
   }
@@ -194,19 +197,19 @@ const sendBuffer = async () => {
  */
 const scheduleBufferSend = () => {
   // Если уже есть запланированная отправка - не планируем новую
-  if (bufferTimeoutId) return;
+  if (sendInterval) return;
   
   // Планируем отправку через 2 секунды бездействия
-  bufferTimeoutId = setTimeout(() => {
-    bufferTimeoutId = null;
+  sendInterval = setTimeout(() => {
+    sendInterval = null;
     sendBuffer();
   }, 2000);
   
   // Если буфер слишком большой - отправляем сразу
   if (actionBuffer.length >= 10) {
-    if (bufferTimeoutId) {
-      clearTimeout(bufferTimeoutId);
-      bufferTimeoutId = null;
+    if (sendInterval) {
+      clearTimeout(sendInterval);
+      sendInterval = null;
     }
     sendBuffer();
   }
@@ -216,9 +219,9 @@ const scheduleBufferSend = () => {
  * Отправка всех накопленных логов перед выходом со страницы
  */
 export const flushLogs = () => {
-  if (bufferTimeoutId) {
-    clearTimeout(bufferTimeoutId);
-    bufferTimeoutId = null;
+  if (sendInterval) {
+    clearTimeout(sendInterval);
+    sendInterval = null;
   }
   
   sendBuffer();

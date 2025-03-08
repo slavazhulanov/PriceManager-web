@@ -37,13 +37,41 @@ def init_supabase_client() -> Optional[Client]:
         url = settings.SUPABASE_URL
         key = settings.SUPABASE_KEY
         bucket_name = settings.SUPABASE_BUCKET
+        folder_name = settings.SUPABASE_FOLDER
         
         logger.info(f"Инициализация Supabase клиента: URL={url}, Bucket={bucket_name}")
         logger.info(f"Используемый ключ API: {key[:10]}...{key[-5:]} (скрыт для безопасности)")
         
         client = create_client(url, key)
         
-        # Предполагаем, что бакет уже создан и настроен через панель управления Supabase
+        # Проверяем наличие бакета (но не пытаемся создать, так как это требует админских прав)
+        try:
+            # Проверка существования бакета
+            logger.info(f"Проверяем наличие бакета {bucket_name}")
+            storage = client.storage.get_bucket(bucket_name)
+            logger.info(f"Бакет {bucket_name} найден")
+            
+            # Проверяем наличие папки, создавая пустой файл-маркер если её нет
+            try:
+                logger.info(f"Проверяем доступность папки {folder_name}")
+                # Пробуем загрузить файл-маркер
+                marker_path = f"{folder_name}/.folder_marker"
+                client.storage.from_(bucket_name).upload(
+                    marker_path, 
+                    b"This is a folder marker. Do not delete.",
+                    {"content-type": "text/plain", "upsert": True}
+                )
+                logger.info(f"Папка {folder_name} проверена и доступна")
+            except Exception as folder_error:
+                logger.warning(f"Не удалось проверить папку {folder_name}: {str(folder_error)}")
+                logger.warning("Это может вызвать проблемы при сохранении файлов")
+        except Exception as bucket_error:
+            logger.warning(f"Не удалось проверить бакет {bucket_name}: {str(bucket_error)}")
+            logger.warning("Это может вызвать проблемы при сохранении файлов")
+            
+            # Даже если проверка не удалась, продолжаем работу с клиентом
+            # так как фактическая работа с бакетом будет проверена при первой операции
+        
         logger.info(f"Supabase клиент успешно инициализирован, используется бакет {bucket_name}")
         supabase_client = client
         return client
@@ -244,7 +272,7 @@ def get_file_content(filename: str) -> Optional[bytes]:
     # Сначала пытаемся получить из кеша
     cached_content = get_cached_content(filename)
     if cached_content:
-        logger.info(f"Файл {filename} получен из кеша, размер: {len(cached_content)} байт")
+        logger.info(f"Файл {filename} получен из кеша, размер: {len(cached_content) / 1024:.1f} КБ")
         return cached_content
     
     # Получаем существующий клиент или создаем новый
@@ -259,12 +287,39 @@ def get_file_content(filename: str) -> Optional[bytes]:
         logger.info(f"Чтение файла из Supabase Storage: {file_path}")
         
         # Скачиваем содержимое файла
-        content = client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
-        logger.info(f"Файл успешно загружен из Supabase, размер: {len(content)} байт")
-        
-        # Кешируем содержимое
-        cache_file_content(filename, content)
-        return content
+        try:
+            content = client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
+            logger.info(f"Файл успешно загружен из Supabase, размер: {len(content) / 1024:.1f} КБ")
+            
+            # Кешируем содержимое
+            cache_file_content(filename, content)
+            return content
+        except Exception as download_error:
+            # Пробуем получить публичный URL и скачать файл напрямую
+            logger.warning(f"Не удалось загрузить файл через API, пробуем через публичный URL: {str(download_error)}")
+            
+            try:
+                public_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
+                logger.info(f"Получен публичный URL файла: {public_url}")
+                
+                import httpx
+                with httpx.Client() as http_client:
+                    response = http_client.get(public_url)
+                    if response.status_code == 200:
+                        content = response.content
+                        logger.info(f"Файл успешно загружен через публичный URL, размер: {len(content) / 1024:.1f} КБ")
+                        
+                        # Кешируем содержимое
+                        cache_file_content(filename, content)
+                        return content
+                    else:
+                        logger.error(f"Ошибка при загрузке файла через публичный URL: HTTP {response.status_code}")
+                        logger.error(f"Ответ сервера: {response.text}")
+                        return None
+            except Exception as url_error:
+                logger.error(f"Ошибка при попытке загрузки через публичный URL: {str(url_error)}")
+                logger.error(traceback.format_exc())
+                return None
     except Exception as e:
         logger.error(f"Ошибка при загрузке файла из Supabase: {str(e)}")
         logger.error(f"Полная ошибка: {traceback.format_exc()}")
