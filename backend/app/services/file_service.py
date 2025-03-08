@@ -3,20 +3,99 @@ import pandas as pd
 import chardet
 import io
 import uuid
-from typing import List, Dict, Any, Optional
+import time
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional, Tuple
 from supabase import create_client, Client
 from app.core.config import settings
-from app.services.file_cache import cache_file_content, get_cached_content
+from app.services.file_cache import cache_file_content, get_cached_content, clear_old_cache
 import logging
 import traceback
 
 logger = logging.getLogger("app.services.file")
 
-# Инициализация клиента Supabase, если включены настройки для облачного хранилища
+# Инициализация клиента Supabase
 supabase_client: Optional[Client] = None
-if settings.USE_CLOUD_STORAGE and settings.SUPABASE_URL and settings.SUPABASE_KEY:
-    logger.info("Инициализация Supabase клиента для облачного хранилища")
-    supabase_client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+
+def init_supabase_client() -> Optional[Client]:
+    """
+    Инициализация клиента Supabase с обработкой ошибок
+    
+    Returns:
+        Optional[Client]: Клиент Supabase или None в случае ошибки
+    """
+    global supabase_client
+    
+    if supabase_client:
+        return supabase_client
+        
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        logger.error("Не указаны SUPABASE_URL или SUPABASE_KEY")
+        return None
+        
+    try:
+        url = settings.SUPABASE_URL
+        key = settings.SUPABASE_KEY
+        bucket_name = settings.SUPABASE_BUCKET
+        
+        logger.info(f"Инициализация Supabase клиента: URL={url}, Bucket={bucket_name}")
+        logger.info(f"Используемый ключ API: {key[:10]}...{key[-5:]} (скрыт для безопасности)")
+        
+        client = create_client(url, key)
+        
+        # Предполагаем, что бакет уже создан и настроен через панель управления Supabase
+        logger.info(f"Supabase клиент успешно инициализирован, используется бакет {bucket_name}")
+        supabase_client = client
+        return client
+    except Exception as e:
+        logger.error(f"Ошибка при инициализации Supabase клиента: {str(e)}")
+        logger.error(f"Полная ошибка: {traceback.format_exc()}")
+        return None
+
+# Инициализируем клиент при запуске
+init_supabase_client()
+
+# Планировщик очистки старых файлов в Supabase
+async def cleanup_old_files(max_age_days: int = 7):
+    """
+    Удаляет файлы старше указанного количества дней из Supabase
+    """
+    client = init_supabase_client()
+    if not client:
+        logger.error("Не удалось инициализировать Supabase клиент для очистки файлов")
+        return
+        
+    try:
+        # Получаем список файлов
+        files = client.storage.from_(settings.SUPABASE_BUCKET).list(settings.SUPABASE_FOLDER)
+        logger.info(f"Найдено {len(files)} файлов для проверки на старость")
+        
+        # Получаем дату, старше которой файлы нужно удалить
+        cutoff_date = datetime.now() - timedelta(days=max_age_days)
+        deleted_count = 0
+        
+        # Удаляем старые файлы
+        # Примечание: Supabase не предоставляет информацию о дате создания файла через API,
+        # поэтому мы используем соглашение об именовании файлов
+        for file in files:
+            file_path = file.get('name', '')
+            
+            # Определяем, является ли файл временным (содержит 'temp' или 'updated' в имени)
+            is_temp = 'temp_' in file_path or 'updated_' in file_path
+            
+            if is_temp:
+                try:
+                    path = f"{settings.SUPABASE_FOLDER}/{file_path}"
+                    client.storage.from_(settings.SUPABASE_BUCKET).remove([path])
+                    logger.info(f"Удален старый файл из Supabase: {path}")
+                    deleted_count += 1
+                except Exception as del_err:
+                    logger.warning(f"Не удалось удалить файл {file_path}: {str(del_err)}")
+        
+        logger.info(f"Очистка старых файлов завершена, удалено {deleted_count} файлов")
+    except Exception as e:
+        logger.error(f"Ошибка при очистке старых файлов в Supabase: {str(e)}")
+        logger.debug(traceback.format_exc())
 
 def detect_encoding(file_content: bytes) -> str:
     """
@@ -115,12 +194,9 @@ def read_file(file_content: bytes, extension: str, encoding: str, separator: str
 
 def save_file(filename: str, file_content: bytes) -> str:
     """
-    Сохранение файла в хранилище
+    Сохранение файла в хранилище Supabase
     
-    В случае локального хранилища - сохраняет на диск
-    В случае облачного хранилища (Supabase) - загружает в бакет
-    
-    Возвращает путь или URL к сохраненному файлу
+    Возвращает URL к сохраненному файлу
     """
     logger.info(f"Сохранение файла: {filename}, размер: {len(file_content)} байт")
     
@@ -131,64 +207,35 @@ def save_file(filename: str, file_content: bytes) -> str:
     except Exception as e:
         logger.error(f"Ошибка при кешировании файла {filename}: {str(e)}")
     
-    if not settings.USE_CLOUD_STORAGE:
-        # Сохранение в локальное хранилище
-        try:
-            logger.info(f"Сохранение в локальное хранилище: {settings.UPLOAD_DIR}")
-            os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-            file_path = os.path.join(settings.UPLOAD_DIR, filename)
-            
-            with open(file_path, 'wb') as f:
-                f.write(file_content)
-            
-            logger.info(f"Файл успешно сохранен по пути: {file_path}")
-            
-            # Проверяем наличие файла после сохранения
-            if os.path.exists(file_path):
-                file_size = os.path.getsize(file_path)
-                logger.info(f"Проверка файла: {file_path} существует, размер: {file_size} байт")
-            else:
-                logger.error(f"Проверка файла: {file_path} не существует после сохранения!")
-                
-            return file_path
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении файла в локальное хранилище: {str(e)}")
-            logger.debug(traceback.format_exc())
-            raise ValueError(f"Не удалось сохранить файл: {str(e)}")
-    else:
-        # Сохранение в Supabase Storage
-        if not supabase_client:
-            logger.error("Supabase client не инициализирован")
-            raise ValueError("Supabase client не инициализирован")
-        
+    # Получаем существующий клиент или создаем новый
+    client = init_supabase_client()
+    if not client:
+        raise ValueError("Не удалось инициализировать Supabase клиент для сохранения файла")
+    
+    try:
         # Формируем путь к файлу в Supabase
         file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
         logger.info(f"Сохранение в Supabase Storage: {file_path}")
         
-        try:
-            # Загружаем файл в Supabase
-            supabase_client.storage.from_(settings.SUPABASE_BUCKET).upload(
-                file_path,
-                file_content,
-                {"content-type": "application/octet-stream"}
-            )
-            
-            # Получаем публичный URL
-            public_url = supabase_client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
-            logger.info(f"Файл успешно загружен в Supabase, URL: {public_url}")
-            
-            return public_url
-        except Exception as e:
-            logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
-            logger.debug(traceback.format_exc())
-            raise ValueError(f"Не удалось сохранить файл в облачное хранилище: {str(e)}")
+        # Загружаем файл в Supabase
+        client.storage.from_(settings.SUPABASE_BUCKET).upload(
+            file_path,
+            file_content,
+            {"content-type": "application/octet-stream"}
+        )
+        
+        # Получаем публичный URL
+        cloud_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
+        logger.info(f"Файл успешно загружен в Supabase, URL: {cloud_url}")
+        return cloud_url
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
+        logger.error(f"Полная ошибка: {traceback.format_exc()}")
+        raise ValueError(f"Не удалось сохранить файл в Supabase: {str(e)}")
 
 def get_file_content(filename: str) -> Optional[bytes]:
     """
-    Получение содержимого файла из хранилища
-    
-    В случае локального хранилища - читает с диска
-    В случае облачного хранилища (Supabase) - загружает из бакета
+    Получение содержимого файла из хранилища Supabase
     
     Возвращает содержимое файла в виде байтов
     """
@@ -200,59 +247,64 @@ def get_file_content(filename: str) -> Optional[bytes]:
         logger.info(f"Файл {filename} получен из кеша, размер: {len(cached_content)} байт")
         return cached_content
     
-    # Если в кеше нет, пробуем из хранилища
+    # Получаем существующий клиент или создаем новый
+    client = init_supabase_client()
+    if not client:
+        logger.error("Не удалось создать клиент Supabase")
+        return None
+    
     try:
-        if not settings.USE_CLOUD_STORAGE:
-            # Чтение из локального хранилища
-            file_path = os.path.join(settings.UPLOAD_DIR, filename)
-            logger.info(f"Чтение файла из локального хранилища: {file_path}")
-            
-            if not os.path.exists(file_path):
-                logger.error(f"Файл не найден: {file_path}")
-                
-                # Проверим, есть ли что-то вообще в директории
-                try:
-                    dir_contents = os.listdir(settings.UPLOAD_DIR)
-                    logger.info(f"Содержимое директории {settings.UPLOAD_DIR}: {', '.join(dir_contents) if dir_contents else 'пусто'}")
-                except Exception as dir_err:
-                    logger.error(f"Ошибка при чтении директории {settings.UPLOAD_DIR}: {str(dir_err)}")
-                
-                return None
-                
-            try:
-                with open(file_path, 'rb') as f:
-                    content = f.read()
-                    logger.info(f"Файл успешно прочитан из локального хранилища, размер: {len(content)} байт")
-                    # Кешируем содержимое
-                    cache_file_content(filename, content)
-                    return content
-            except Exception as read_err:
-                logger.error(f"Ошибка при чтении файла {file_path}: {str(read_err)}")
-                logger.debug(traceback.format_exc())
-                return None
-        else:
-            # Чтение из Supabase Storage
-            if not supabase_client:
-                logger.error("Supabase client не инициализирован")
-                raise ValueError("Supabase client не инициализирован")
-            
-            # Формируем путь к файлу в Supabase
-            file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
-            logger.info(f"Чтение файла из Supabase Storage: {file_path}")
-            
-            try:
-                # Загружаем содержимое файла
-                content = supabase_client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
-                logger.info(f"Файл успешно загружен из Supabase, размер: {len(content)} байт")
-                
-                # Кешируем содержимое
-                cache_file_content(filename, content)
-                return content
-            except Exception as supabase_err:
-                logger.error(f"Ошибка при загрузке файла из Supabase: {str(supabase_err)}")
-                logger.debug(traceback.format_exc())
-                return None
+        # Формируем путь к файлу в Supabase
+        file_path = f"{settings.SUPABASE_FOLDER}/{filename}"
+        logger.info(f"Чтение файла из Supabase Storage: {file_path}")
+        
+        # Скачиваем содержимое файла
+        content = client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
+        logger.info(f"Файл успешно загружен из Supabase, размер: {len(content)} байт")
+        
+        # Кешируем содержимое
+        cache_file_content(filename, content)
+        return content
     except Exception as e:
-        logger.error(f"Непредвиденная ошибка при получении содержимого файла {filename}: {str(e)}")
+        logger.error(f"Ошибка при загрузке файла из Supabase: {str(e)}")
+        logger.error(f"Полная ошибка: {traceback.format_exc()}")
+        return None
+
+def dataframe_to_bytes(df: pd.DataFrame, extension: str, encoding: str, separator: str) -> bytes:
+    """
+    Преобразование DataFrame в байты для сохранения в файл
+    
+    Args:
+        df (pd.DataFrame): DataFrame для преобразования
+        extension (str): Расширение файла (.csv, .xlsx и т.д.)
+        encoding (str): Кодировка для текстовых файлов
+        separator (str): Разделитель для CSV-файлов
+        
+    Returns:
+        bytes: Содержимое файла в виде байтов
+    """
+    logger.info(f"Преобразование DataFrame ({len(df)} строк, {len(df.columns)} колонок) в байты")
+    buffer = io.BytesIO()
+    
+    try:
+        if extension.lower() in ['.xlsx', '.xls']:
+            # Для Excel-файлов
+            logger.info("Сохранение в формате Excel")
+            df.to_excel(buffer, index=False, engine='openpyxl')
+        elif extension.lower() == '.csv':
+            # Для CSV-файлов
+            logger.info(f"Сохранение в формате CSV (кодировка: {encoding}, разделитель: '{separator}')")
+            df.to_csv(buffer, index=False, encoding=encoding, sep=separator)
+        else:
+            # По умолчанию сохраняем как CSV
+            logger.warning(f"Неизвестное расширение файла: {extension}, сохраняем как CSV")
+            df.to_csv(buffer, index=False, encoding=encoding, sep=separator)
+        
+        buffer.seek(0)
+        content = buffer.getvalue()
+        logger.info(f"DataFrame успешно преобразован в байты, размер: {len(content)} байт")
+        return content
+    except Exception as e:
+        logger.error(f"Ошибка при преобразовании DataFrame в байты: {str(e)}")
         logger.debug(traceback.format_exc())
-        return None 
+        raise ValueError(f"Не удалось преобразовать DataFrame в байты: {str(e)}") 

@@ -1,27 +1,84 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
 import time
 import logging
+import logging.config
 import sys
 from typing import Callable
 import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from fastapi.responses import JSONResponse
+import traceback
 
 from app.api.api import api_router
 from app.core.config import settings
+from app.services.file_service import cleanup_old_files
+from app.services.file_cache import clear_old_cache, get_cache_stats
 
 # Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+settings.setup_logs_directory()
+logging_config = settings.get_logging_config()
+logging.config.dictConfig(logging_config)
 
-logger = logging.getLogger("app")
+logger = logging.getLogger("app.main")
+
+# Инициализация планировщика
+scheduler = AsyncIOScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Контекстный менеджер жизненного цикла приложения
+    """
+    # Запуск приложения
+    start_time = time.time()
+    logger.info(f"Запуск приложения {settings.APP_NAME} v{settings.VERSION}")
+    logger.info(f"Режим отладки: {'включен' if settings.DEBUG else 'выключен'}")
+    logger.info(f"Уровень логирования: {settings.LOG_LEVEL}")
+    
+    # Настройка и запуск планировщика
+    logger.info("Инициализация планировщика задач")
+    
+    # Планировщик очистки кеша каждый час
+    scheduler.add_job(
+        clear_old_cache,
+        'interval',
+        hours=1,
+        kwargs={"max_age": 3600}  # 1 час
+    )
+    
+    # Планировщик очистки старых файлов в Supabase каждый день
+    scheduler.add_job(
+        cleanup_old_files,
+        'interval',
+        days=1,
+        kwargs={"max_age_days": 7}  # 7 дней
+    )
+    
+    scheduler.start()
+    logger.info("Планировщик задач запущен")
+    
+    # Логируем информацию о запуске
+    logger.info(f"Приложение запущено за {time.time() - start_time:.2f} секунд")
+    
+    yield
+    
+    # Остановка приложения
+    logger.info("Остановка планировщика задач")
+    scheduler.shutdown()
+    
+    logger.info("Приложение остановлено")
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    description=settings.DESCRIPTION,
+    version=settings.VERSION,
+    lifespan=lifespan
+)
 
 # Middleware для установки уникального идентификатора запроса
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -31,12 +88,6 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
-
-app = FastAPI(
-    title="PriceManager API",
-    description="API для работы с прайс-листами",
-    version="1.0.0"
-)
 
 # Добавляем middleware для request_id
 app.add_middleware(RequestIDMiddleware)
@@ -58,60 +109,93 @@ async def log_requests(request: Request, call_next: Callable):
         logger.error(f"[{request_id}] Ошибка при обработке {request.method} {request.url.path} - {str(e)}, Время: {process_time:.4f}s")
         raise
 
-# Настройка CORS для взаимодействия с фронтендом
+# Добавление middleware CORS
+origins = settings.parse_cors_origins()
+logger.info(f"Настройка CORS для доменов: {origins}")
+
+# Валидация и фильтрация CORS origins для продакшн
+valid_origins = []
+for origin in origins:
+    # Проверка на потенциально опасные символы в origin
+    if '*' in origin and not origin.startswith('https://*.'):
+        logger.warning(f"Потенциально небезопасный CORS origin с wildcard: {origin}")
+    
+    # Проверка на использование HTTPS в продакшн
+    if settings.DEBUG is False and origin.startswith('http://') and not origin.startswith('http://localhost'):
+        logger.warning(f"Небезопасный HTTP origin в режиме продакшн: {origin}")
+    else:
+        valid_origins.append(origin)
+
+logger.info(f"Итоговый список CORS origins: {valid_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=valid_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
 )
 
-# Подключение API роутеров
-logger.info(f"Подключение API роутера с префиксом {settings.API_V1_STR}")
+# Включаем роутер API
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# Проверка состояния системы при запуске
+# Добавляем маршрут диагностики для проверки состояния приложения
+@app.get("/health")
+async def health_check():
+    """
+    Эндпоинт для проверки работоспособности приложения
+    """
+    # Базовая информация о состоянии приложения
+    health_info = {
+        "status": "ok",
+        "app_name": settings.APP_NAME,
+        "version": settings.VERSION,
+        "debug": settings.DEBUG,
+        "log_level": settings.LOG_LEVEL,
+        "cache": get_cache_stats()
+    }
+    
+    return health_info
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """
+    Глобальный обработчик исключений
+    """
+    error_id = uuid.uuid4()
+    
+    # Подробное логирование ошибки с уникальным идентификатором
+    logger.error(
+        f"Необработанное исключение [ID: {error_id}]: {str(exc)}", 
+        exc_info=True,
+        extra={
+            "error_id": str(error_id),
+            "request_path": request.url.path,
+            "request_method": request.method,
+            "client_ip": request.client.host if request.client else "unknown"
+        }
+    )
+    
+    # Формируем сообщение об ошибке для клиента в зависимости от режима отладки
+    if settings.DEBUG:
+        error_message = f"Внутренняя ошибка сервера: {str(exc)}"
+        error_details = {"traceback": str(traceback.format_exc())}
+    else:
+        error_message = "Внутренняя ошибка сервера. Обратитесь к администратору."
+        error_details = {"error_id": str(error_id)}
+    
+    return JSONResponse(
+        status_code=500, 
+        content={
+            "error": error_message,
+            "details": error_details
+        }
+    )
+
+# Инициализация при запуске
 @app.on_event("startup")
 async def startup_event():
-    logger.info("=== Запуск приложения PriceManager API ===")
-    
-    # Создаем директорию для временных файлов, если её нет
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-    logger.info(f"Проверка директории для загрузки файлов: {settings.UPLOAD_DIR}")
-    
-    # Проверка содержимого директории
-    try:
-        files = os.listdir(settings.UPLOAD_DIR)
-        logger.info(f"Содержимое директории {settings.UPLOAD_DIR}: {len(files)} файлов")
-        
-        if files:
-            for idx, file in enumerate(files[:10]):  # Логируем только первые 10 файлов
-                file_path = os.path.join(settings.UPLOAD_DIR, file)
-                if os.path.isfile(file_path):
-                    file_size = os.path.getsize(file_path)
-                    logger.info(f"Файл {idx+1}/{len(files)}: {file} ({file_size} байт)")
-            
-            if len(files) > 10:
-                logger.info(f"... и еще {len(files) - 10} файлов")
-    except Exception as e:
-        logger.error(f"Ошибка при проверке директории {settings.UPLOAD_DIR}: {str(e)}")
-    
-    # Проверка настроек
-    logger.info(f"Настройки приложения:")
-    logger.info(f"- API префикс: {settings.API_V1_STR}")
-    logger.info(f"- CORS origins: {settings.CORS_ORIGINS}")
-    logger.info(f"- Использование облачного хранилища: {'Да' if settings.USE_CLOUD_STORAGE else 'Нет'}")
-    logger.info(f"- Максимальный размер загружаемого файла: {settings.MAX_UPLOAD_SIZE / (1024*1024):.2f} МБ")
-    
-    logger.info("=== Приложение PriceManager API запущено успешно ===")
-
-# Создаем директорию для временных файлов
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-
-# Подключаем статическую директорию для загруженных файлов
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
-logger.info(f"Статическая директория '/uploads' подключена")
+    logger.info("Инициализация завершена, приложение готово к обработке запросов")
 
 @app.get("/")
 async def root():

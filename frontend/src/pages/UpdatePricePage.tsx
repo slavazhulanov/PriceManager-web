@@ -179,19 +179,35 @@ const UpdatePricePage: React.FC = () => {
       
       setIsDownloading(true);
       
-      // Получаем базовый URL API без /api/v1 на конце
-      const baseApiUrl = process.env.REACT_APP_API_URL 
-        ? process.env.REACT_APP_API_URL.replace(/\/api\/v1$/, '')
-        : 'http://localhost:8000';
+      // Получаем URL для скачивания
+      let downloadUrl = updatedFile.download_url;
       
-      // Формируем правильный URL для скачивания
-      const downloadUrl = `${baseApiUrl}${updatedFile.download_url}`;
+      // Проверяем, является ли это абсолютным URL (например, от Supabase)
+      if (downloadUrl.startsWith('http')) {
+        console.log('Обнаружен абсолютный URL (вероятно, Supabase):', downloadUrl);
+        // Используем URL как есть
+      } else if (downloadUrl.includes('/mocks/')) {
+        console.log('Обнаружен мок-URL, используем специальный эндпоинт');
+        // Если это мок-URL, используем специальный эндпоинт на бэкенде
+        const baseApiUrl = process.env.REACT_APP_API_URL || '/api/v1';
+        downloadUrl = `${baseApiUrl.replace(/\/api\/v1$/, '')}/api/v1/files/download/sample`;
+      } else {
+        // Для относительных URL добавляем базовый URL API
+        const baseApiUrl = process.env.REACT_APP_API_URL 
+          ? process.env.REACT_APP_API_URL.replace(/\/api\/v1$/, '')
+          : 'http://localhost:8000';
+          
+        downloadUrl = `${baseApiUrl}${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+      }
       
-      console.log('URL для скачивания:', downloadUrl);
+      console.log('Итоговый URL для скачивания:', downloadUrl);
       console.log('Начало fetch-запроса...');
       
+      // Добавляем временную метку для предотвращения кеширования
+      const urlWithTimestamp = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}_t=${Date.now()}`;
+      
       // Используем fetch для получения содержимого файла
-      fetch(downloadUrl)
+      fetch(urlWithTimestamp)
         .then(response => {
           console.log('Получен ответ от сервера:', {
             status: response.status,
@@ -228,10 +244,17 @@ const UpdatePricePage: React.FC = () => {
           const url = window.URL.createObjectURL(csvBlob);
           console.log('Создан URL для blob:', url);
           
+          // Определяем имя файла для скачивания
+          let downloadFileName = updatedFile.filename;
+          // Если имя файла содержит "mock", используем более подходящее имя
+          if (downloadFileName.includes('mock')) {
+            downloadFileName = `updated_prices_${new Date().toISOString().slice(0, 10)}.csv`;
+          }
+          
           // Создаем ссылку для скачивания
           const link = document.createElement('a');
           link.href = url;
-          link.setAttribute('download', updatedFile.filename);
+          link.setAttribute('download', downloadFileName);
           
           console.log('Создана ссылка для скачивания:', {
             href: link.href,
@@ -259,6 +282,35 @@ const UpdatePricePage: React.FC = () => {
             url: downloadUrl,
             fileInfo: updatedFile
           });
+          
+          // Если ошибка связана с Supabase, попробуем скачать через бэкенд
+          if (downloadUrl.includes('supabase') && typeof error === 'object' && error !== null) {
+            console.log('Ошибка в Supabase, пробуем скачать через бэкенд-прокси...');
+            
+            // Формируем URL для скачивания через бэкенд
+            const baseApiUrl = process.env.REACT_APP_API_URL || '/api/v1';
+            const proxyUrl = `${baseApiUrl}/files/proxy-download?url=${encodeURIComponent(downloadUrl)}`;
+            
+            console.log('Повторная попытка через прокси:', proxyUrl);
+            
+            // Оповещаем пользователя
+            setError('Пробуем альтернативный способ скачивания...');
+            
+            // Создаем ссылку для скачивания через прокси
+            const link = document.createElement('a');
+            link.href = proxyUrl;
+            link.setAttribute('download', updatedFile.filename);
+            document.body.appendChild(link);
+            link.click();
+            
+            // Удаляем ссылку
+            setTimeout(() => {
+              document.body.removeChild(link);
+              setIsDownloading(false);
+            }, 100);
+            
+            return;
+          }
           
           setError(`Ошибка при скачивании файла: ${error.message}`);
           setIsDownloading(false);

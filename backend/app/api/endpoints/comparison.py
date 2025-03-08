@@ -40,21 +40,6 @@ async def compare_price_lists(
     else:
         logger.info(f"[{request_id}] Маппинг колонок файла магазина: article={store_file.column_mapping.article_column}, price={store_file.column_mapping.price_column}, name={store_file.column_mapping.name_column}")
     
-    # Проверяем существование файлов
-    supplier_path = os.path.join(settings.UPLOAD_DIR, supplier_file.stored_filename)
-    store_path = os.path.join(settings.UPLOAD_DIR, store_file.stored_filename)
-    
-    logger.info(f"[{request_id}] Проверяем наличие файлов:")
-    logger.info(f"[{request_id}] Файл поставщика: {supplier_path} - существует: {os.path.exists(supplier_path)}")
-    logger.info(f"[{request_id}] Файл магазина: {store_path} - существует: {os.path.exists(store_path)}")
-    
-    # Проверка директории uploads
-    try:
-        upload_contents = os.listdir(settings.UPLOAD_DIR)
-        logger.info(f"[{request_id}] Содержимое директории {settings.UPLOAD_DIR}: {', '.join(upload_contents) if upload_contents else 'пусто'}")
-    except Exception as e:
-        logger.error(f"[{request_id}] Ошибка при чтении директории {settings.UPLOAD_DIR}: {str(e)}")
-    
     # Проверка типов файлов
     if supplier_file.file_type != "supplier" or store_file.file_type != "store":
         error_msg = f"Неверные типы файлов. Необходимо указать файл поставщика и файл магазина"

@@ -1,19 +1,32 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import os
+import logging
 import pandas as pd
 import io
 from supabase import create_client
 import time
+import traceback
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+)
+logger = logging.getLogger("vercel_handler")
 
 # Инициализация Supabase
 def get_supabase_client():
     supabase_url = os.environ.get("SUPABASE_URL")
     supabase_key = os.environ.get("SUPABASE_KEY")
     if not supabase_url or not supabase_key:
+        logger.error("Отсутствуют переменные окружения SUPABASE_URL или SUPABASE_KEY")
         return None
-    return create_client(supabase_url, supabase_key)
+    try:
+        return create_client(supabase_url, supabase_key)
+    except Exception as e:
+        logger.error(f"Не удалось инициализировать Supabase клиент: {str(e)}")
+        return None
 
 # Функция для получения содержимого файла из Supabase
 def get_file_content(stored_filename):
@@ -31,7 +44,7 @@ def get_file_content(stored_filename):
         
         return response
     except Exception as e:
-        print(f"Ошибка при получении файла из Supabase: {str(e)}")
+        logger.error(f"Ошибка при получении файла из Supabase: {str(e)}")
         return None
 
 # Функция для чтения и анализа файла
@@ -43,7 +56,7 @@ def read_file(file_content, extension, encoding, separator):
             df = pd.read_csv(io.BytesIO(file_content), encoding=encoding, sep=separator)
         return df
     except Exception as e:
-        print(f"Ошибка при чтении файла: {str(e)}")
+        logger.error(f"Ошибка при чтении файла: {str(e)}")
         return None
 
 
@@ -141,7 +154,7 @@ def compare_files(supplier_file_info, store_file_info):
             "missing_in_supplier": missing_in_supplier
         }
     except Exception as e:
-        print(f"Ошибка при сравнении файлов: {str(e)}")
+        logger.error(f"Ошибка при сравнении файлов: {str(e)}")
         return {"error": f"Ошибка при сравнении файлов: {str(e)}"}
 
 class handler(BaseHTTPRequestHandler):
@@ -159,7 +172,7 @@ class handler(BaseHTTPRequestHandler):
                 parts = self.path.split('/')
                 filename = parts[-1]  # Последняя часть URL - имя файла
                 
-                print(f"Получен запрос на получение колонок файла: {filename}")
+                logger.info(f"Получен запрос на получение колонок файла: {filename}")
                 
                 # Определяем тип файла по имени
                 is_supplier = 'supplier' in filename or 'поставщик' in filename.lower()
@@ -213,7 +226,7 @@ class handler(BaseHTTPRequestHandler):
                     # Проверяем, является ли контент многофайловым
                     content_type = self.headers.get('Content-Type', '')
                     if 'multipart/form-data' in content_type:
-                        print("Получен запрос на загрузку файла (multipart/form-data)")
+                        logger.info("Получен запрос на загрузку файла (multipart/form-data)")
                         
                         # В реальном приложении здесь должен быть код для обработки multipart/form-data и сохранения файла
                         
@@ -266,7 +279,7 @@ class handler(BaseHTTPRequestHandler):
                     # Парсим JSON
                     data = json.loads(post_data.decode('utf-8'))
                     
-                    print(f"Получен запрос на сохранение маппинга колонок для файла: {data.get('original_filename', 'неизвестный')}")
+                    logger.info(f"Получен запрос на сохранение маппинга колонок для файла: {data.get('original_filename', 'неизвестный')}")
                     
                     # В реальном приложении здесь должен быть код для сохранения маппинга
                     
@@ -351,10 +364,10 @@ class handler(BaseHTTPRequestHandler):
                     format_info = data.get('format_info', {})
                     
                     # Логирование для отладки
-                    print(f"Получен запрос на сохранение данных:")
-                    print(f"- Файл магазина: {store_file.get('filename', 'не указан')}")
-                    print(f"- Количество обновлений: {len(updates)}")
-                    print(f"- Сохранять формат: {preserve_format}")
+                    logger.info(f"Получен запрос на сохранение данных:")
+                    logger.info(f"- Файл магазина: {store_file.get('filename', 'не указан')}")
+                    logger.info(f"- Количество обновлений: {len(updates)}")
+                    logger.info(f"- Сохранять формат: {preserve_format}")
                     
                     # Имя файла для сохранения результатов
                     filename = store_file.get('filename', '')
@@ -397,8 +410,8 @@ class handler(BaseHTTPRequestHandler):
                     updates = data.get('updates', [])
                     store_file = data.get('store_file', {})
                     
-                    print(f"Получен запрос на обновление цен для файла магазина: {store_file.get('original_filename', 'неизвестный')}")
-                    print(f"Количество обновлений: {len(updates)}")
+                    logger.info(f"Получен запрос на обновление цен для файла магазина: {store_file.get('original_filename', 'неизвестный')}")
+                    logger.info(f"Количество обновлений: {len(updates)}")
                     
                     # В реальном приложении здесь должна быть логика обновления цен в файле
                     
