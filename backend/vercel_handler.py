@@ -8,6 +8,7 @@ from supabase import create_client
 import time
 import traceback
 import cgi
+import uuid
 
 # Настройка логирования
 logging.basicConfig(
@@ -444,8 +445,178 @@ class handler(BaseHTTPRequestHandler):
             # Получаем данные запроса
             post_data = self.rfile.read(content_length)
             
+            # Обработчик для генерации URL для прямой загрузки в Supabase
+            if self.path == '/api/v1/files/upload_url':
+                try:
+                    logger.info("[UPLOAD_URL] Получен запрос на генерацию URL для прямой загрузки")
+                    
+                    # Декодируем JSON данные
+                    data = json.loads(post_data.decode('utf-8'))
+                    file_name = data.get('fileName')
+                    file_type = data.get('fileType')
+                    
+                    if not file_name:
+                        raise ValueError("Поле fileName обязательно")
+                    
+                    logger.info(f"[UPLOAD_URL] Запрос URL для файла: {file_name}, тип: {file_type}")
+                    
+                    # Генерируем уникальное имя файла для хранения
+                    timestamp = int(time.time())
+                    file_extension = os.path.splitext(file_name)[1].lower()
+                    stored_filename = f"file_{timestamp}_{uuid.uuid4().hex[:8]}{file_extension}"
+                    
+                    # Инициализируем Supabase клиент
+                    client = get_supabase_client()
+                    if not client:
+                        raise ValueError("Не удалось инициализировать Supabase клиент")
+                    
+                    # Получаем настройки хранилища
+                    bucket_name = os.environ.get("SUPABASE_BUCKET", "price-manager")
+                    folder = os.environ.get("SUPABASE_FOLDER", "uploads")
+                    
+                    # Формируем путь к файлу в Supabase
+                    file_path = f"{folder}/{stored_filename}" if folder else stored_filename
+                    
+                    # Генерируем URL для загрузки с клиента напрямую
+                    logger.info(f"[UPLOAD_URL] Генерация URL для загрузки файла: {file_path}")
+                    signed_url = client.storage.from_(bucket_name).create_signed_upload_url(file_path)
+                    
+                    # Формируем ответ
+                    response_data = {
+                        "uploadUrl": signed_url["signed_url"],
+                        "fileInfo": {
+                            "stored_filename": stored_filename,
+                            "original_filename": file_name,
+                            "file_type": file_type,
+                            "path": file_path,
+                            "bucket": bucket_name
+                        }
+                    }
+                    
+                    logger.info(f"[UPLOAD_URL] URL для загрузки успешно сгенерирован: {stored_filename}")
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(response_data).encode())
+                    
+                except Exception as e:
+                    logger.error(f"[UPLOAD_URL] Ошибка при генерации URL для загрузки: {str(e)}")
+                    logger.error(f"[UPLOAD_URL] Трассировка: {traceback.format_exc()}")
+                    
+                    # Отправляем ответ с ошибкой
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при генерации URL для загрузки: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+                    
+            # Обработчик для регистрации файла после загрузки в Supabase
+            elif self.path == '/api/v1/files/register':
+                try:
+                    logger.info("[REGISTER] Получен запрос на регистрацию загруженного файла")
+                    
+                    # Декодируем JSON данные
+                    data = json.loads(post_data.decode('utf-8'))
+                    file_info = data.get('fileInfo')
+                    
+                    if not file_info or not file_info.get('stored_filename'):
+                        raise ValueError("Отсутствует информация о файле")
+                        
+                    stored_filename = file_info.get('stored_filename')
+                    original_filename = file_info.get('original_filename')
+                    file_type = file_info.get('file_type')
+                    
+                    logger.info(f"[REGISTER] Регистрация файла: {stored_filename} (оригинал: {original_filename})")
+                    
+                    # Получаем содержимое файла для определения кодировки и разделителя
+                    file_content = get_file_content(stored_filename)
+                    
+                    if not file_content:
+                        raise ValueError(f"Не удалось получить содержимое файла {stored_filename}")
+                        
+                    # Определение кодировки
+                    try:
+                        import chardet
+                        result = chardet.detect(file_content)
+                        encoding = result['encoding']
+                        confidence = result['confidence']
+                        logger.info(f"[REGISTER] Определена кодировка: {encoding} (уверенность: {confidence:.2f})")
+                    except Exception as e:
+                        logger.error(f"[REGISTER] Ошибка при определении кодировки: {str(e)}")
+                        encoding = 'utf-8'  # по умолчанию
+                    
+                    # Определение разделителя
+                    try:
+                        sample = file_content[:4096].decode(encoding)
+                        
+                        # Подсчитываем количество разных разделителей
+                        separators = {',': 0, ';': 0, '\t': 0, '|': 0}
+                        
+                        for separator in separators.keys():
+                            # Берем первую строку (предполагаемый заголовок)
+                            if '\n' in sample:
+                                first_line = sample.split('\n')[0]
+                                separators[separator] = first_line.count(separator)
+                        
+                        # Определяем наиболее вероятный разделитель
+                        max_count = max(separators.values())
+                        separator = ','  # по умолчанию
+                        
+                        for sep, count in separators.items():
+                            if count == max_count and max_count > 0:
+                                separator = sep
+                                break
+                        
+                        logger.info(f"[REGISTER] Определен разделитель: '{separator}'")
+                    except Exception as e:
+                        logger.error(f"[REGISTER] Ошибка при определении разделителя: {str(e)}")
+                        separator = ','  # по умолчанию
+                    
+                    # Формируем ответ с полной информацией о файле
+                    file_info_response = {
+                        "id": f"file-{uuid.uuid4()}",
+                        "original_filename": original_filename,
+                        "stored_filename": stored_filename,
+                        "file_type": file_type,
+                        "encoding": encoding,
+                        "separator": separator
+                    }
+                    
+                    logger.info(f"[REGISTER] Файл успешно зарегистрирован: {stored_filename}")
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(file_info_response).encode())
+                    
+                except Exception as e:
+                    logger.error(f"[REGISTER] Ошибка при регистрации файла: {str(e)}")
+                    logger.error(f"[REGISTER] Трассировка: {traceback.format_exc()}")
+                    
+                    # Отправляем ответ с ошибкой
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    error_msg = {"error": f"Ошибка при регистрации файла: {str(e)}"}
+                    self.wfile.write(json.dumps(error_msg).encode())
+            
             # Обработчик загрузки файлов
-            if self.path == '/api/v1/files/upload' or self.path == '/files/upload':
+            elif self.path == '/api/v1/files/upload' or self.path == '/files/upload':
                 try:
                     logger.info("[UPLOAD] Получен запрос на загрузку файла")
                     logger.info(f"[UPLOAD] Content-Type: {self.headers.get('Content-Type', 'не указан')}")
@@ -728,6 +899,53 @@ class handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     error_msg = {"error": f"Ошибка при обновлении цен: {str(e)}"}
                     self.wfile.write(json.dumps(error_msg).encode())
+
+            # Обработчик для сохранения метаданных файла после прямой загрузки
+            elif self.path == '/api/v1/files/save-metadata' or self.path == '/files/save-metadata':
+                try:
+                    logger.info("[METADATA] Получен запрос на сохранение метаданных файла")
+                    
+                    # Получаем данные запроса
+                    content_length = int(self.headers.get('Content-Length', 0))
+                    post_data = self.rfile.read(content_length)
+                    data = json.loads(post_data.decode('utf-8'))
+                    
+                    # Извлекаем метаданные файла
+                    file_info = {
+                        "id": data.get("id", ""),
+                        "original_filename": data.get("original_filename", ""),
+                        "stored_filename": data.get("stored_filename", ""),
+                        "file_type": data.get("file_type", ""),
+                        "encoding": data.get("encoding", "utf-8"),
+                        "separator": data.get("separator", ","),
+                        "upload_status": data.get("upload_status", "completed")
+                    }
+                    
+                    logger.info(f"[METADATA] Сохранение метаданных для файла: {file_info['stored_filename']}")
+                    
+                    # Здесь можно было бы сохранить метаданные в базу данных, если бы она была
+                    # В нашем случае просто возвращаем успешный ответ
+                    
+                    # Отправляем успешный ответ
+                    self.send_response(200)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(file_info).encode())
+                    
+                except Exception as e:
+                    logger.error(f"[METADATA] Ошибка при сохранении метаданных: {str(e)}")
+                    logger.error(f"[METADATA] Трассировка: {traceback.format_exc()}")
+                    
+                    self.send_response(500)
+                    self.send_header('Content-type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": f"Ошибка: {str(e)}"}).encode())
             else:
                 self.send_response(404)
                 self.send_header('Content-type', 'application/json')
