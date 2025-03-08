@@ -191,7 +191,8 @@ class VercelHandler(BaseHTTPRequestHandler):
 
 # Функция-обработчик для Vercel
 def handler(event, context):
-    return {
-        'statusCode': 200,
-        'body': json.dumps({'message': 'Hello from Vercel!'})
-    }
+    """
+    Основная функция-обработчик для Vercel Serverless
+    Должна возвращать класс, который является подклассом BaseHTTPRequestHandler
+    """
+    return VercelHandler
