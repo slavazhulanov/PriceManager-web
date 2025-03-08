@@ -42,21 +42,22 @@ def get_file_content(stored_filename):
             return get_file_content.file_cache[stored_filename]
         
         # В Vercel для мок-файлов генерируем тестовые данные без обращения к Supabase
-        if "mock_" in stored_filename:
-            logger.info(f"Генерация тестовых данных для мок-файла: {stored_filename}")
-            
-            # Генерируем разные данные в зависимости от назначения файла
-            if "_supplier" in stored_filename or any(stored_filename.endswith(x) for x in ["1_mock_file.csv", "3_mock_file.csv", "5_mock_file.csv", "7_mock_file.csv", "9_mock_file.csv"]):
-                # Данные поставщика
-                test_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
-            else:
-                # Данные магазина
-                test_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
-                
-            # Сохраняем в кеш для последующих запросов
-            get_file_content.file_cache[stored_filename] = test_content
-            logger.info(f"Сгенерированы тестовые данные для мок-файла: {stored_filename}, размер: {len(test_content)} байт")
-            return test_content
+        # Временно отключено для тестирования на реальных данных
+        # if "mock_" in stored_filename:
+        #     logger.info(f"Генерация тестовых данных для мок-файла: {stored_filename}")
+        #     
+        #     # Генерируем разные данные в зависимости от назначения файла
+        #     if "_supplier" in stored_filename or any(stored_filename.endswith(x) for x in ["1_mock_file.csv", "3_mock_file.csv", "5_mock_file.csv", "7_mock_file.csv", "9_mock_file.csv"]):
+        #         # Данные поставщика
+        #         test_content = "Артикул,Наименование товара,Цена поставщика,Количество\n1001,Товар 1,100.00,10\n1002,Товар 2,200.00,20\n1003,Товар 3,300.00,30".encode('utf-8')
+        #     else:
+        #         # Данные магазина
+        #         test_content = "Артикул,Наименование товара,Цена магазина,Количество\n1001,Товар 1,150.00,5\n1002,Товар 2,250.00,15\n1004,Товар 4,400.00,25".encode('utf-8')
+        #             
+        #     # Сохраняем в кеш для последующих запросов
+        #     get_file_content.file_cache[stored_filename] = test_content
+        #     logger.info(f"Сгенерированы тестовые данные для мок-файла: {stored_filename}, размер: {len(test_content)} байт")
+        #     return test_content
         
         # Для реальных файлов обращаемся к Supabase
         # Настройка клиента Supabase
