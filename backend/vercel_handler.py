@@ -4,7 +4,7 @@ import logging
 import traceback
 import datetime
 
-# Настройка логирования
+# Настройка логирования  
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
