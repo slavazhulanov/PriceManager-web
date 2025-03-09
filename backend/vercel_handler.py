@@ -1,10 +1,8 @@
-import http.server
 import json
 import os
 import logging
 import traceback
 import datetime
-from http.server import BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,54 +29,6 @@ def generate_response(status_code, body, headers=None):
         'body': json.dumps(body) if isinstance(body, (dict, list)) else body
     }
 
-class VercelHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        """Обработка GET запросов"""
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        
-        response = {
-            'message': 'GET запрос успешно обработан',
-            'path': self.path,
-            'timestamp': datetime.datetime.now().isoformat()
-        }
-        
-        self.wfile.write(json.dumps(response).encode('utf-8'))
-    
-    def do_POST(self):
-        """Обработка POST запросов"""
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length).decode('utf-8')
-        
-        try:
-            data = json.loads(post_data) if post_data else {}
-        except json.JSONDecodeError:
-            data = {'raw': post_data}
-        
-        self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        
-        response = {
-            'message': 'POST запрос успешно обработан',
-            'path': self.path,
-            'data': data,
-            'timestamp': datetime.datetime.now().isoformat()
-        }
-        
-        self.wfile.write(json.dumps(response).encode('utf-8'))
-    
-    def do_OPTIONS(self):
-        """Обработка OPTIONS запросов (для CORS)"""
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
-
 def handler(event, context):
     """
     Основная функция-обработчик запросов Vercel
@@ -98,16 +48,24 @@ def handler(event, context):
         method = event.get('method', '')
         path = event.get('path', '')
         
+        # Обработка preflight CORS запросов
+        if method == 'OPTIONS':
+            return generate_response(200, {})
+        
         # Обрабатываем запросы к API
         if path.startswith('/api/'):
             # Чистый путь без префикса /api
             api_path = path[4:] if path.startswith('/api/') else path
             
-            if method == 'OPTIONS':
-                # Обработка preflight CORS запросов
-                return generate_response(200, {})
-            elif method == 'GET':
-                return generate_response(200, {'message': 'API GET endpoint', 'path': path})
+            # Обработка метода GET
+            if method == 'GET':
+                return generate_response(200, {
+                    'message': 'API GET endpoint', 
+                    'path': path,
+                    'timestamp': datetime.datetime.now().isoformat()
+                })
+                
+            # Обработка метода POST
             elif method == 'POST':
                 # Получаем body запроса, если есть
                 body = {}
@@ -117,12 +75,24 @@ def handler(event, context):
                     except:
                         logger.warning(f"Не удалось распарсить body запроса: {event.get('body')}")
                 
-                return generate_response(200, {'message': 'API POST endpoint', 'path': path, 'received_data': body})
+                return generate_response(200, {
+                    'message': 'API POST endpoint', 
+                    'path': path, 
+                    'received_data': body,
+                    'timestamp': datetime.datetime.now().isoformat()
+                })
         
         # Если запрос не совпал ни с одним маршрутом
-        return generate_response(404, {'error': 'Not found', 'path': path})
+        return generate_response(404, {
+            'error': 'Not found', 
+            'path': path,
+            'timestamp': datetime.datetime.now().isoformat()
+        })
         
     except Exception as e:
         logger.error(f"Ошибка при обработке запроса: {str(e)}")
         logger.error(traceback.format_exc())
-        return generate_response(500, {'error': f'Internal server error: {str(e)}'})
+        return generate_response(500, {
+            'error': f'Internal server error: {str(e)}',
+            'timestamp': datetime.datetime.now().isoformat()
+        })

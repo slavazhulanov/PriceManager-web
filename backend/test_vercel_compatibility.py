@@ -41,7 +41,7 @@ def header(message: str) -> None:
     print(f"\n{BOLD}{message}{ENDC}")
 
 def create_test_event(method: str = 'GET', path: str = '/api/test') -> Dict[str, Any]:
-    """Создание тестового события в формате AWS API Gateway"""
+    """Создание тестового события в формате Vercel"""
     return {
         'method': method,
         'path': path,
@@ -50,7 +50,7 @@ def create_test_event(method: str = 'GET', path: str = '/api/test') -> Dict[str,
             'User-Agent': 'Mozilla/5.0',
             'Host': 'example.vercel.app'
         },
-        'body': json.dumps({'test': 'data'}) if method == 'POST' else '',
+        'body': json.dumps({'test': 'data'}) if method == 'POST' else None,
         'isBase64Encoded': False
     }
 
@@ -144,6 +144,9 @@ def test_dependencies() -> bool:
             
         if 'numpy' in requirements:
             warning("Библиотека numpy может вызвать проблемы с размером Lambda функции или совместимостью")
+
+        if any('http.server' in req for req in requirements):
+            warning("Библиотека http.server может вызвать конфликты с платформой Vercel")
             
         success(f"Файл {requirements_path} проверен, найдено {len(requirements)} зависимостей")
         return True
@@ -219,6 +222,7 @@ def main() -> None:
         info("1. Исправьте ошибки, указанные выше")
         info("2. Минимизируйте размер и зависимости функции handler")
         info("3. Убедитесь, что код совместим со средой выполнения Vercel")
+        info("4. Избегайте использования http.server и BaseHTTPRequestHandler в файле handler")
 
 if __name__ == "__main__":
     main() 
