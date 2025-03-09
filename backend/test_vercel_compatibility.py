@@ -55,15 +55,15 @@ def create_test_event(method: str = 'GET', path: str = '/api/test') -> Dict[str,
     }
 
 def load_handler_module() -> Tuple[Optional[Any], Optional[str]]:
-    """Загрузка модуля handler.py"""
+    """Загрузка модуля api.py"""
     try:
-        handler_path = 'vercel_handler.py'
+        handler_path = 'api.py'
         
         if not os.path.exists(handler_path):
             error(f"Файл {handler_path} не найден")
             return None, f"Файл {handler_path} не найден"
             
-        spec = importlib.util.spec_from_file_location("vercel_handler", handler_path)
+        spec = importlib.util.spec_from_file_location("api", handler_path)
         if not spec or not spec.loader:
             error(f"Не удалось загрузить спецификацию модуля из {handler_path}")
             return None, f"Не удалось загрузить спецификацию модуля из {handler_path}"
@@ -127,6 +127,28 @@ def test_http_methods(handler_module: Any) -> bool:
     
     return all_successful
 
+def test_api_endpoints(handler_module: Any) -> bool:
+    """Тестирование конкретных API эндпоинтов"""
+    handler_func = handler_module.handler
+    all_successful = True
+    
+    # Тестирование эндпоинта upload_url
+    try:
+        event = create_test_event(method='POST', path='/api/v1/files/upload_url')
+        response = handler_func(event, {})
+        
+        status_code = response.get('statusCode')
+        if not status_code or status_code >= 400:
+            error(f"Эндпоинт /api/v1/files/upload_url вернул код состояния {status_code}")
+            all_successful = False
+        else:
+            success(f"Эндпоинт /api/v1/files/upload_url успешно обработан (код {status_code})")
+    except Exception as e:
+        error(f"Ошибка при тестировании эндпоинта /api/v1/files/upload_url: {str(e)}")
+        all_successful = False
+        
+    return all_successful
+
 def test_dependencies() -> bool:
     """Проверка зависимостей"""
     requirements_path = 'vercel_requirements.txt'
@@ -173,6 +195,10 @@ def test_vercel_config() -> bool:
         if not python_build:
             error("Не найдена конфигурация для Python в секции builds")
             return False
+        
+        # Проверка правильного файла API
+        if not any(b.get('src') == 'backend/api.py' for b in builds):
+            warning("Не найдена конфигурация для backend/api.py в секции builds")
             
         # Проверка routes
         routes = config.get('routes', [])
@@ -180,6 +206,9 @@ def test_vercel_config() -> bool:
         
         if not api_route:
             warning("Не найдено правило маршрутизации для API (/api)")
+        
+        if not any(r.get('dest') == 'backend/api.py' for r in routes):
+            warning("Не найдено маршрутизация к backend/api.py")
             
         success("Конфигурация Vercel проверена")
         return True
@@ -200,6 +229,7 @@ def main() -> None:
     tests = [
         ("Проверка формата handler", lambda: test_handler_format(handler_module)),
         ("Тестирование HTTP методов", lambda: test_http_methods(handler_module)),
+        ("Тестирование API эндпоинтов", lambda: test_api_endpoints(handler_module)),
         ("Проверка зависимостей", test_dependencies),
         ("Проверка конфигурации Vercel", test_vercel_config)
     ]

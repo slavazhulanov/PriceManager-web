@@ -2,7 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "backend/vercel_handler.py",
+      "src": "backend/api.py",
       "use": "@vercel/python",
       "config": {
         "runtime": "python3.9",
@@ -20,7 +20,7 @@
   "routes": [
     {
       "src": "/api(.*)",
-      "dest": "backend/vercel_handler.py"
+      "dest": "backend/api.py"
     },
     {
       "src": "/(.*)",
