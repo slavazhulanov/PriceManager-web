@@ -63,20 +63,12 @@ const FileUploadPage: React.FC = () => {
       // Загрузка колонок для файла поставщика
       if (supplierFile && !supplierColumns.length) {
         try {
-          // В реальном приложении или если включен флаг использования реального API
-          if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-            const columns = await fileService.getColumns(
-              supplierFile.stored_filename,
-              supplierFile.encoding,
-              supplierFile.separator
-            );
-            setSupplierColumns(columns);
-          } else {
-            // Для демонстрации используем моковые данные
-            // Если файл содержит 'mock' в имени, используем предопределенные колонки
-            const mockColumns = ['Артикул', 'Цена поставщика', 'Наименование товара', 'Категория', 'Бренд'];
-            setSupplierColumns(mockColumns);
-          }
+          const columns = await fileService.getColumns(
+            supplierFile.stored_filename,
+            supplierFile.encoding,
+            supplierFile.separator
+          );
+          setSupplierColumns(columns);
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла поставщика:', err);
           setError(`Ошибка загрузки колонок для файла поставщика: ${err.message || err}`);
@@ -86,19 +78,12 @@ const FileUploadPage: React.FC = () => {
       // Загрузка колонок для файла магазина
       if (storeFile && !storeColumns.length) {
         try {
-          // В реальном приложении или если включен флаг использования реального API
-          if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-            const columns = await fileService.getColumns(
-              storeFile.stored_filename,
-              storeFile.encoding,
-              storeFile.separator
-            );
-            setStoreColumns(columns);
-          } else {
-            // Для демонстрации используем моковые данные
-            const mockColumns = ['Артикул', 'Цена магазина', 'Наименование товара', 'Остаток', 'Категория'];
-            setStoreColumns(mockColumns);
-          }
+          const columns = await fileService.getColumns(
+            storeFile.stored_filename,
+            storeFile.encoding,
+            storeFile.separator
+          );
+          setStoreColumns(columns);
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла магазина:', err);
           setError(`Ошибка загрузки колонок для файла магазина: ${err.message || err}`);
@@ -133,17 +118,14 @@ const FileUploadPage: React.FC = () => {
       setSupplierFile(updatedFile);
       setSuccess('Колонки для файла поставщика настроены');
       
-      // В реальном приложении сохраняем маппинг на сервере
-      if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-        fileService.saveColumnMapping(updatedFile)
-          .then(() => {
-            console.log('Маппинг колонок для поставщика успешно сохранен на сервере');
-          })
-          .catch(err => {
-            console.error('Ошибка при сохранении маппинга колонок поставщика:', err);
-            // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
-          });
-      }
+      fileService.saveColumnMapping(updatedFile)
+        .then(() => {
+          console.log('Маппинг колонок для поставщика успешно сохранен на сервере');
+        })
+        .catch(err => {
+          console.error('Ошибка при сохранении маппинга колонок поставщика:', err);
+          // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
+        });
     }
   };
   
@@ -156,17 +138,14 @@ const FileUploadPage: React.FC = () => {
       setStoreFile(updatedFile);
       setSuccess('Колонки для файла магазина настроены');
       
-      // В реальном приложении сохраняем маппинг на сервере
-      if (process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true') {
-        fileService.saveColumnMapping(updatedFile)
-          .then(() => {
-            console.log('Маппинг колонок для магазина успешно сохранен на сервере');
-          })
-          .catch(err => {
-            console.error('Ошибка при сохранении маппинга колонок магазина:', err);
-            // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
-          });
-      }
+      fileService.saveColumnMapping(updatedFile)
+        .then(() => {
+          console.log('Маппинг колонок для магазина успешно сохранен на сервере');
+        })
+        .catch(err => {
+          console.error('Ошибка при сохранении маппинга колонок магазина:', err);
+          // Не показываем пользователю ошибку, так как поля уже сохранены в интерфейсе
+        });
     }
   };
   
@@ -201,8 +180,6 @@ const FileUploadPage: React.FC = () => {
   
   // Переход к сравнению
   const handleGoToComparison = () => {
-    // В реальном приложении мы бы здесь сохраняли данные в localStorage или Redux
-    // и переходили на страницу сравнения
     navigate('/comparison', { 
       state: { 
         supplierFile,
@@ -302,37 +279,28 @@ const FileUploadPage: React.FC = () => {
         );
       case 2:
         return (
-          <Card sx={{ p: 3 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom color="primary">
-                Готово к сравнению
+          <Box textAlign="center" p={3}>
+            <Paper sx={{ p: 4, maxWidth: 600, mx: 'auto' }}>
+              <Typography variant="h5" gutterBottom color="primary">
+                Все готово для сравнения цен!
               </Typography>
               
-              <Typography variant="body1" paragraph>
-                Поздравляем! Все необходимые данные загружены и настроены. Теперь вы можете перейти к сравнению цен.
+              <Typography paragraph sx={{ mb: 4 }}>
+                Нажмите на кнопку ниже, чтобы перейти к сравнению цен между файлами
+                поставщика и магазина. Вы сможете увидеть разницу в ценах и обновить
+                свои цены.
               </Typography>
               
-              <Typography variant="body2" paragraph color="text.secondary">
-                На следующем экране вы увидите:
-                <ul>
-                  <li>Товары с разницей в ценах между поставщиком и магазином</li>
-                  <li>Товары, которые есть у поставщика, но отсутствуют в вашем магазине</li>
-                  <li>Товары, которые есть в магазине, но отсутствуют у поставщика</li>
-                </ul>
-              </Typography>
-              
-              <Box sx={{ mt: 3 }}>
-                <Button 
-                  variant="contained" 
-                  color="primary" 
-                  size="large"
-                  onClick={handleGoToComparison}
-                >
-                  Перейти к сравнению цен
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                size="large"
+                onClick={handleGoToComparison}
+              >
+                Перейти к сравнению цен
+              </Button>
+            </Paper>
+          </Box>
         );
       default:
         return 'Неизвестный шаг';
@@ -340,15 +308,10 @@ const FileUploadPage: React.FC = () => {
   };
   
   return (
-    <Container maxWidth="lg">
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Загрузка и настройка файлов
-        </Typography>
-        <Typography variant="subtitle1" color="text.secondary">
-          Загрузите файлы прайс-листов поставщика и магазина для сравнения и обновления цен
-        </Typography>
-      </Box>
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 8 }}>
+      <Typography variant="h4" gutterBottom align="center" sx={{ mb: 4 }}>
+        Загрузка и подготовка прайс-листов
+      </Typography>
       
       {error && (
         <Alert severity="error" sx={{ mb: 3 }}>
@@ -357,46 +320,63 @@ const FileUploadPage: React.FC = () => {
       )}
       
       {success && (
-        <Alert severity="success" sx={{ mb: 3 }} onClose={() => setSuccess(null)}>
+        <Alert severity="success" sx={{ mb: 3 }}>
           {success}
         </Alert>
       )}
       
-      <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
+      <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 5 }}>
         {steps.map((step, index) => (
           <Step key={step.label}>
             <StepLabel 
-              StepIconProps={{ 
-                icon: step.icon 
+              StepIconProps={{
+                icon: step.icon
               }}
             >
-              <Typography variant="subtitle2">{step.label}</Typography>
-              <Typography variant="caption" color="text.secondary">{step.description}</Typography>
+              {step.label}
             </StepLabel>
           </Step>
         ))}
       </Stepper>
       
-      <Box sx={{ mb: 4 }}>
-        {getStepContent(activeStep)}
+      <Box sx={{ mb: 5 }}>
+        <Typography variant="subtitle1" align="center" color="text.secondary" gutterBottom>
+          {steps[activeStep]?.description}
+        </Typography>
       </Box>
       
-      <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+      {columnsLoading && activeStep === 1 && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 3 }}>
+          <CircularProgress />
+        </Box>
+      )}
+      
+      {getStepContent(activeStep)}
+      
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 4 }}>
         <Button
           variant="outlined"
           onClick={handleBack}
           disabled={activeStep === 0}
-          sx={{ mr: 1 }}
         >
           Назад
         </Button>
         
-        {activeStep < steps.length - 1 && (
+        {activeStep === steps.length - 1 ? (
           <Button
             variant="contained"
+            color="primary"
+            onClick={handleGoToComparison}
+          >
+            Перейти к сравнению
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            color="primary"
             onClick={handleNext}
           >
-            {activeStep === 0 ? 'Далее: Настройка колонок' : 'Далее: Проверка данных'}
+            Далее
           </Button>
         )}
       </Box>

@@ -62,98 +62,33 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       setError(null);
       setUploadProgress(0);
       
-      // Проверяем, используем ли реальный API или моки
-      const useRealApi = process.env.NODE_ENV === 'production' || process.env.REACT_APP_USE_REAL_API === 'true';
-      console.log(`Режим API: ${useRealApi ? 'Реальный API' : 'Mock API'}, file: ${file.name}`);
+      // Шаг 1: Получаем URL для загрузки
+      console.log('Запрос URL для прямой загрузки в Supabase');
+      const { uploadUrl, fileInfo } = await fileService.getUploadUrl(file.name, fileType);
       
-      if (useRealApi) {
-        // Используем прямую загрузку в Supabase для производительности
-        try {
-          // Шаг 1: Получаем URL для загрузки
-          console.log('Запрос URL для прямой загрузки в Supabase');
-          const { uploadUrl, fileInfo } = await fileService.getUploadUrl(file.name, fileType);
-          
-          // Шаг 2: Загружаем файл напрямую в Supabase
-          console.log('Начало прямой загрузки в Supabase', uploadUrl);
-          setUploadProgress(10);
-          
-          // Имитируем прогресс загрузки
-          const progressInterval = setInterval(() => {
-            setUploadProgress(prev => {
-              if (prev >= 90) {
-                clearInterval(progressInterval);
-                return 90;
-              }
-              return prev + 10;
-            });
-          }, 300);
-          
-          const uploadSuccess = await fileService.uploadToSupabase(file, uploadUrl);
-          clearInterval(progressInterval);
-          
-          if (!uploadSuccess) {
-            throw new Error('Не удалось загрузить файл в Supabase');
-          }
-          
-          setUploadProgress(95);
-          console.log('Файл успешно загружен в Supabase');
-          
-          // Шаг 3: Регистрируем файл в нашем API
-          console.log('Регистрация файла в системе');
-          const registeredFileInfo = await fileService.registerUploadedFile(fileInfo);
-          
-          setUploadProgress(100);
-          console.log('Файл успешно зарегистрирован:', registeredFileInfo);
-          
-          onFileUploaded(registeredFileInfo);
-          setFileUploaded(true);
-        } catch (supabaseError: any) {
-          console.error('Ошибка при прямой загрузке в Supabase:', supabaseError);
-          
-          // Если прямая загрузка не удалась, используем резервный метод
-          console.log('Использование резервного метода загрузки');
-          const fileInfo = await fileService.uploadFile(file, fileType);
-          onFileUploaded(fileInfo);
-          setFileUploaded(true);
-        }
-      } else {
-        // Для демонстрации просто имитируем загрузку
-        console.log('Загрузка файла через Mock API');
-        
-        // Имитируем прогресс загрузки
-        const progressInterval = setInterval(() => {
-          setUploadProgress(prev => {
-            if (prev >= 90) {
-              clearInterval(progressInterval);
-              return 90;
-            }
-            return prev + 10;
-          });
-        }, 200);
-        
-        setTimeout(() => {
-          clearInterval(progressInterval);
-          setUploadProgress(100);
-          
-          // Для файлов с mock_ в имени не добавляем префикс, иначе добавляем
-          const mockFilename = file.name.toLowerCase().includes('mock_') 
-            ? file.name 
-            : 'mock_' + file.name;
-            
-          const fileInfo = {
-            id: 'mock-id-' + Date.now(),
-            original_filename: file.name,
-            stored_filename: mockFilename,
-            file_type: fileType,
-            encoding: 'utf-8',
-            separator: ','
-          };
-          
-          console.log('Создан фейковый объект FileInfo:', fileInfo);
-          onFileUploaded(fileInfo);
-          setFileUploaded(true);
-        }, 1000);
+      // Шаг 2: Загружаем файл напрямую в Supabase
+      console.log('Начало прямой загрузки в Supabase', uploadUrl);
+      setUploadProgress(10);
+      
+      // Загрузка файла
+      const uploadSuccess = await fileService.uploadToSupabase(file, uploadUrl);
+      
+      if (!uploadSuccess) {
+        throw new Error('Не удалось загрузить файл в Supabase');
       }
+      
+      setUploadProgress(95);
+      console.log('Файл успешно загружен в Supabase');
+      
+      // Шаг 3: Регистрируем файл в нашем API
+      console.log('Регистрация файла в системе');
+      const registeredFileInfo = await fileService.registerUploadedFile(fileInfo);
+      
+      setUploadProgress(100);
+      console.log('Файл успешно зарегистрирован:', registeredFileInfo);
+      
+      onFileUploaded(registeredFileInfo);
+      setFileUploaded(true);
     } catch (err: any) {
       setError(err.message || 'Произошла ошибка при загрузке файла.');
       console.error('Ошибка при загрузке файла:', err);
@@ -226,11 +161,17 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
         </Alert>
       )}
       
-      {uploadProgress > 0 && uploadProgress < 100 && (
+      {/* Показываем прогресс-бар при любом значении прогресса больше 0 или во время загрузки */}
+      {(uploadProgress > 0 || loading) && (
         <Box sx={{ width: '100%', mb: 2 }}>
-          <LinearProgress variant="determinate" value={uploadProgress} />
+          <LinearProgress 
+            variant={uploadProgress > 0 ? "determinate" : "indeterminate"} 
+            value={uploadProgress} 
+          />
           <Typography variant="caption" align="center" display="block" sx={{ mt: 1 }}>
-            Загрузка файла: {uploadProgress}%
+            {uploadProgress > 0 
+              ? `Загрузка файла: ${uploadProgress}%` 
+              : "Подготовка к загрузке..."}
           </Typography>
         </Box>
       )}
@@ -273,16 +214,21 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            cursor: 'pointer',
+            cursor: loading ? 'default' : 'pointer',
             width: '100%',
             height: '100%',
             justifyContent: 'center',
+            pointerEvents: loading ? 'none' : 'auto', // Отключаем взаимодействие при загрузке
           }}
         >
           <input {...getInputProps()} />
           
-          {loading ? (
+          {loading && uploadProgress === 0 ? (
             <CircularProgress />
+          ) : loading ? (
+            <Typography variant="body2" color="text.secondary" align="center">
+              Загрузка в процессе...
+            </Typography>
           ) : (
             <>
               <CloudUploadIcon color="primary" sx={{ fontSize: 48, mb: 2 }} />

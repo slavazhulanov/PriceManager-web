@@ -181,11 +181,10 @@ export const priceService = {
   
   // Сохранение обновленного файла
   async saveUpdatedFile(storeFile: FileInfo, updates: PriceUpdate[]): Promise<UpdatedFileResponse> {
-    // Добавляем в запрос информацию о необходимости сохранения оригинального формата файла
     const response = await api.post('prices/save', {
       store_file: storeFile,
       updates,
-      preserve_format: true, // Флаг для явного указания необходимости сохранения формата
+      preserve_format: true,
       format_info: {
         encoding: storeFile.encoding,
         separator: storeFile.separator,

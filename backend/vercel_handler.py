@@ -1,119 +1,112 @@
-from http.server import BaseHTTPRequestHandler
+import http.server
 import json
 import os
 import logging
 import traceback
-import time
-from datetime import datetime
+import datetime
+from http.server import BaseHTTPRequestHandler
 
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("vercel_handler")
+logger = logging.getLogger('vercel_handler')
 
-# Простая функция для генерации ответа
 def generate_response(status_code, body, headers=None):
-    default_headers = {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    }
-    
-    if headers:
-        default_headers.update(headers)
+    """
+    Генерирует стандартизованный ответ для Vercel serverless функции
+    """
+    if headers is None:
+        headers = {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        }
     
     return {
         'statusCode': status_code,
-        'headers': default_headers,
+        'headers': headers,
         'body': json.dumps(body) if isinstance(body, (dict, list)) else body
     }
 
-# HTTP обработчик для Vercel
 class VercelHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Обработка GET запросов"""
-        try:
-            # Базовые эндпоинты
-            if self.path == '/' or self.path == '/api':
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'message': 'PriceManager API работает'}).encode())
-            else:
-                self.send_response(404)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': 'Not found'}).encode())
-        except Exception as e:
-            logger.error(f"Ошибка при обработке GET запроса: {str(e)}")
-            logger.error(traceback.format_exc())
-            self.send_response(500)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': f'Internal server error: {str(e)}'}).encode())
-
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        
+        response = {
+            'message': 'GET запрос успешно обработан',
+            'path': self.path,
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        
+        self.wfile.write(json.dumps(response).encode('utf-8'))
+    
     def do_POST(self):
         """Обработка POST запросов"""
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length).decode('utf-8')
+        
         try:
-            if self.path.startswith('/api'):
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'message': 'API endpoint'}).encode())
-            else:
-                self.send_response(404)
-                self.send_header('Content-type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                self.wfile.write(json.dumps({'error': 'Not found'}).encode())
-        except Exception as e:
-            logger.error(f"Ошибка при обработке POST запроса: {str(e)}")
-            logger.error(traceback.format_exc())
-            self.send_response(500)
-            self.send_header('Content-type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps({'error': f'Internal server error: {str(e)}'}).encode())
-
+            data = json.loads(post_data) if post_data else {}
+        except json.JSONDecodeError:
+            data = {'raw': post_data}
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        
+        response = {
+            'message': 'POST запрос успешно обработан',
+            'path': self.path,
+            'data': data,
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        
+        self.wfile.write(json.dumps(response).encode('utf-8'))
+    
     def do_OPTIONS(self):
-        """Обработка OPTIONS запросов для CORS"""
+        """Обработка OPTIONS запросов (для CORS)"""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        self.wfile.write(''.encode())
 
-# Обработчик для Vercel Serverless Functions
 def handler(event, context):
     """
-    Обработчик запросов в формате AWS Lambda для Vercel
+    Основная функция-обработчик запросов Vercel
+    
+    :param event: событие запроса
+    :param context: контекст выполнения
+    :return: ответ в формате, ожидаемом Vercel
     """
     try:
-        logger.info(f"Получен запрос: метод={event.get('httpMethod', 'unknown')}, путь={event.get('path', 'unknown')}")
+        logger.info(f"Получен запрос: {event.get('method')} {event.get('path')}")
         
-        # Получаем метод и путь из события
-        method = event.get('httpMethod', 'GET')
-        path = event.get('path', '/')
+        # Проверка на запрос проверки здоровья
+        if event.get('path') == '/api/health':
+            return generate_response(200, {'status': 'ok', 'timestamp': datetime.datetime.now().isoformat()})
         
-        # Обработка CORS preflight запросов
-        if method == 'OPTIONS':
-            return generate_response(200, '')
+        # Получаем метод и путь запроса
+        method = event.get('method', '')
+        path = event.get('path', '')
+        
+        # Обрабатываем запросы к API
+        if path.startswith('/api/'):
+            # Чистый путь без префикса /api
+            api_path = path[4:] if path.startswith('/api/') else path
             
-        # Базовый health check
-        if path == '/' or path == '/api':
-            return generate_response(200, {'message': 'PriceManager API работает', 'timestamp': str(datetime.now())})
-            
-        # API эндпоинты
-        if path.startswith('/api/v1'):
-            if method == 'GET':
+            if method == 'OPTIONS':
+                # Обработка preflight CORS запросов
+                return generate_response(200, {})
+            elif method == 'GET':
                 return generate_response(200, {'message': 'API GET endpoint', 'path': path})
             elif method == 'POST':
                 # Получаем body запроса, если есть

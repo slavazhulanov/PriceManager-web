@@ -1,4 +1,1 @@
-pandas
-supabase
-httpx
-storage3
+httpx==0.24.1
