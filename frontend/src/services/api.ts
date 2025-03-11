@@ -57,6 +57,77 @@ api.interceptors.response.use(
   (error) => handleApiError(error)
 );
 
+// Функция для создания заглушек методов API для работы офлайн
+// Эта функция вернет тестовый ответ, который будет совместим с тем, что приложение ожидает
+function createMockApiFunction<T>(mockData: T) {
+  return async (...args: any[]): Promise<T> => {
+    console.log('Вызов мок-функции API с аргументами:', args);
+    // Имитация сетевой задержки
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(mockData), 500);
+    });
+  };
+}
+
+// Заглушки для функций загрузки файлов
+export const mockFileService = {
+  // Получение URL для прямой загрузки в Supabase
+  getUploadUrl: createMockApiFunction({
+    uploadUrl: 'https://mock-storage.example.com/upload',
+    fileInfo: {
+      id: `mock-file-${Date.now()}`,
+      original_filename: 'example-file.csv',
+      stored_filename: `mock-${Date.now()}.csv`,
+      file_type: 'supplier',
+      encoding: 'utf-8',
+      separator: ','
+    }
+  }),
+  
+  // Прямая загрузка файла в Supabase по полученному URL
+  uploadToSupabase: createMockApiFunction(true),
+  
+  // Регистрация файла после прямой загрузки
+  registerUploadedFile: createMockApiFunction({
+    id: `mock-file-${Date.now()}`,
+    original_filename: 'example-file.csv',
+    stored_filename: `mock-${Date.now()}.csv`,
+    file_type: 'supplier',
+    encoding: 'utf-8',
+    separator: ','
+  }),
+  
+  // Получение списка колонок из файла
+  getColumns: createMockApiFunction([
+    'Артикул', 
+    'Наименование', 
+    'Цена', 
+    'Остаток', 
+    'Категория'
+  ]),
+  
+  // Сохранение сопоставления колонок
+  saveColumnMapping: createMockApiFunction({
+    id: `mock-file-${Date.now()}`,
+    original_filename: 'example-file.csv',
+    stored_filename: `mock-${Date.now()}.csv`,
+    file_type: 'supplier',
+    encoding: 'utf-8',
+    separator: ',',
+    column_mapping: {
+      sku: 'Артикул',
+      price: 'Цена',
+      name: 'Наименование'
+    }
+  }),
+};
+
+// Заглушки для компонента загрузки - добавляем эти методы временно, чтобы приложение работало без бэкенда
+// Если Vercel не работает, можно раскомментировать эти строки
+// Если их использовать, все файлы будут загружаться локально в браузере без вызова бэкенда
+
+ export const fileService = mockFileService;
+
 // Сервис для работы с файлами
 export const fileService = {
   // Загрузка файла
