@@ -319,9 +319,21 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         logger.debug(f"Извлекаем колонки из файла {filename}")
         columns = get_columns(file_content, extension, encoding, separator)
         
+        # Дополнительное логирование для диагностики
         logger.info(f"Успешно получены колонки для файла {filename}: {columns}")
-        # Дополнительно выводим текущее время для отладки
+        logger.debug(f"Тип колонок: {type(columns)}, Длина: {len(columns) if isinstance(columns, list) else 'не список'}")
         logger.debug(f"Текущее время при возврате ответа: {time.time()}")
+        
+        # Принудительно приводим к типу список, если вдруг вернулся другой тип
+        if not isinstance(columns, list):
+            logger.warning(f"Колонки не в формате списка, преобразуем: {columns}")
+            if isinstance(columns, dict) and "columns" in columns:
+                columns = columns["columns"]
+            elif hasattr(columns, 'keys'):
+                columns = list(columns.keys())
+        
+        # Выводим колонки перед возвратом
+        logger.debug(f"Возвращаемые колонки после обработки: {columns}")
         
         # Возвращаем массив напрямую, так как в response_model указан List[str]
         return columns
