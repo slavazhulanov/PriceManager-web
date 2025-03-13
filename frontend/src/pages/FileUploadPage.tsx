@@ -73,16 +73,26 @@ const FileUploadPage: React.FC = () => {
       return;
     }
     
+    // Проверяем, нужно ли вообще загружать колонки
+    const needSupplierColumns = supplierFile && !supplierColumns.length;
+    const needStoreColumns = storeFile && !storeColumns.length;
+    
+    if (!needSupplierColumns && !needStoreColumns) {
+      console.log('Нет необходимости загружать колонки, все уже загружено');
+      return;
+    }
+    
     setColumnsLoading(true);
     setError(null);
     
     try {
       // Загрузка колонок для файла поставщика
-      if (supplierFile && !supplierColumns.length) {
+      if (needSupplierColumns) {
         try {
           if (!supplierFile.stored_filename) {
             console.error('Отсутствует stored_filename для файла поставщика', supplierFile);
             setError('Ошибка загрузки колонок: отсутствует имя файла');
+            setColumnsLoading(false);
             return;
           }
           
@@ -99,7 +109,12 @@ const FileUploadPage: React.FC = () => {
           );
           
           console.log('Получены колонки для файла поставщика:', columns);
-          setSupplierColumns(columns);
+          if (columns && columns.length > 0) {
+            setSupplierColumns(columns);
+          } else {
+            console.error('Получен пустой список колонок для файла поставщика');
+            setError('Не удалось получить колонки для файла поставщика');
+          }
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла поставщика:', {
             error: err,
@@ -115,11 +130,12 @@ const FileUploadPage: React.FC = () => {
       }
       
       // Загрузка колонок для файла магазина
-      if (storeFile && !storeColumns.length) {
+      if (needStoreColumns) {
         try {
           if (!storeFile.stored_filename) {
             console.error('Отсутствует stored_filename для файла магазина', storeFile);
             setError('Ошибка загрузки колонок: отсутствует имя файла');
+            setColumnsLoading(false);
             return;
           }
           
@@ -136,7 +152,12 @@ const FileUploadPage: React.FC = () => {
           );
           
           console.log('Получены колонки для файла магазина:', columns);
-          setStoreColumns(columns);
+          if (columns && columns.length > 0) {
+            setStoreColumns(columns);
+          } else {
+            console.error('Получен пустой список колонок для файла магазина');
+            setError('Не удалось получить колонки для файла магазина');
+          }
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла магазина:', {
             error: err,
@@ -151,57 +172,87 @@ const FileUploadPage: React.FC = () => {
         });
       }
     } catch (err: any) {
-      console.error('Общая ошибка при загрузке колонок:', {
-        error: err,
-        state: {
-          supplierFile,
-          storeFile,
-          supplierColumns,
-          storeColumns
-        }
-      });
+      console.error('Общая ошибка при загрузке колонок:', err);
       setError(`Ошибка при загрузке колонок: ${err.message || err}`);
     } finally {
-      setColumnsLoading(false);
       console.log('Завершение загрузки колонок', {
         supplierColumns,
-        storeColumns,
-        error,
-        columnsLoading: false
+        storeColumns
       });
+      setColumnsLoading(false);
     }
-  }, [fileService, supplierFile, storeFile, supplierColumns, storeColumns, columnsLoading]);
+  }, [supplierFile, storeFile, supplierColumns, storeColumns, columnsLoading]);
   
   // При изменении файлов загружаем их колонки
   useEffect(() => {
-    loadColumns();
-  }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length, loadColumns]);
+    // Защита от множественных запросов
+    let isActive = true;
+    
+    // Проверяем, нужно ли загружать колонки
+    const needSupplierColumns = supplierFile && !supplierColumns.length;
+    const needStoreColumns = storeFile && !storeColumns.length;
+    
+    if (needSupplierColumns || needStoreColumns) {
+      console.log('Запуск загрузки колонок из useEffect', {
+        supplierFile: !!supplierFile,
+        storeFile: !!storeFile,
+        supplierColumns: supplierColumns.length,
+        storeColumns: storeColumns.length
+      });
+      
+      // Используем setTimeout для предотвращения слишком частых запросов
+      const timeoutId = setTimeout(() => {
+        if (isActive) {
+          loadColumns();
+        }
+      }, 100);
+      
+      return () => {
+        isActive = false;
+        clearTimeout(timeoutId);
+      };
+    }
+    
+    return () => {
+      isActive = false;
+    };
+  }, [supplierFile, storeFile, loadColumns, supplierColumns.length, storeColumns.length]);
   
   // Обработчик загрузки файла поставщика
-  const handleSupplierFileUpload = (fileInfo: FileInfo) => {
+  const handleSupplierFileUpload = useCallback((fileInfo: FileInfo) => {
     console.log('Загружен файл поставщика:', {
       fileInfo,
-      currentState: {
-        supplierFile,
-        supplierColumns
-      }
+      currentSupplierFile: supplierFile,
+      currentSupplierColumns: supplierColumns
     });
+    
+    // Сбрасываем колонки только если загружен новый файл
+    if (!supplierFile || supplierFile.id !== fileInfo.id) {
+      setSupplierColumns([]);
+    }
+    
     setSupplierFile(fileInfo);
-    loadColumns(); // Загружаем колонки после загрузки файла
-  };
+    setSuccess('Файл поставщика успешно загружен');
+    setError(null);
+  }, [supplierFile, supplierColumns]);
   
   // Обработчик загрузки файла магазина
-  const handleStoreFileUpload = (fileInfo: FileInfo) => {
+  const handleStoreFileUpload = useCallback((fileInfo: FileInfo) => {
     console.log('Загружен файл магазина:', {
       fileInfo,
-      currentState: {
-        storeFile,
-        storeColumns
-      }
+      currentStoreFile: storeFile,
+      currentStoreColumns: storeColumns
     });
+    
+    // Сбрасываем колонки только если загружен новый файл
+    if (!storeFile || storeFile.id !== fileInfo.id) {
+      setStoreColumns([]);
+    }
+    
     setStoreFile(fileInfo);
-    loadColumns(); // Загружаем колонки после загрузки файла
-  };
+    setSuccess('Файл магазина успешно загружен');
+    setError(null);
+  }, [storeFile, storeColumns]);
   
   // Обработчик сохранения маппинга колонок для файла поставщика
   const handleSupplierColumnMapping = (mapping: ColumnMapping) => {
