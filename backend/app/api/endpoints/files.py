@@ -320,7 +320,6 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         columns = get_columns(file_content, extension, encoding, separator)
         
         logger.info(f"Успешно получены колонки для файла {filename}: {columns}")
-        # Возвращаем список колонок напрямую, а не в обертке с status
         return columns
     except ValueError as e:
         logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")

@@ -133,6 +133,13 @@ export const fileService = {
     try {
       const response = await api.get(`files/columns/${filename}`, { params });
       console.log('Получены колонки:', response.data);
+      
+      // Проверяем, что response.data является массивом
+      if (!Array.isArray(response.data)) {
+        console.error('Неверный формат данных колонок:', response.data);
+        throw new Error('Неверный формат данных колонок');
+      }
+      
       return response.data;
     } catch (error: any) {
       console.error('Ошибка при получении колонок:', {
