@@ -1,47 +1,25 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "backend/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "runtime": "python3.9",
-        "requirementsPath": "backend/vercel_requirements.txt"
-      }
-    },
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build"
-      }
+  "build": {
+    "env": {
+      "NODE_ENV": "production"
     }
-  ],
+  },
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/build",
   "routes": [
+    { "handle": "filesystem" },
     {
-      "src": "/api/health",
-      "dest": "backend/index.py"
+      "src": "/api/(.*)",
+      "dest": "/api/index.py"
     },
     {
-      "src": "/api(.*)",
-      "dest": "backend/index.py"
-    },
-    {
-      "src": "/static/(.*)",
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/manifest.json",
-      "dest": "/manifest.json"
-    },
-    {
-      "src": "/favicon.ico",
-      "dest": "/favicon.ico"
+      "src": "/debug",
+      "dest": "/debug.html"
     },
     {
       "src": "/(.*)",
-      "dest": "/index.html",
-      "status": 200
+      "dest": "/index.html"
     }
   ]
 } 

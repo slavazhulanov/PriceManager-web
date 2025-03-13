@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PriceManager - Тестовая страница</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #2c3e50;
+    }
+    .success {
+      color: green;
+      font-weight: bold;
+    }
+    .error {
+      color: red;
+      font-weight: bold;
+    }
+    button {
+      background: #3498db;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    button:hover {
+      background: #2980b9;
+    }
+    .result {
+      margin-top: 20px;
+      padding: 10px;
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>PriceManager - Диагностическая страница</h1>
+    <p>Эта страница используется для проверки корректности работы статических активов на Vercel.</p>
+    
+    <div>
+      <h2>Проверка подключения к API:</h2>
+      <button onclick="checkApi()">Проверить API</button>
+      <div id="api-result" class="result">Результат будет здесь...</div>
+    </div>
+
+    <div>
+      <h2>Проверка статических файлов:</h2>
+      <button onclick="checkStaticFiles()">Проверить статические файлы</button>
+      <div id="static-result" class="result">Результат будет здесь...</div>
+    </div>
+
+    <div>
+      <h2>Информация о среде:</h2>
+      <div id="env-info" class="result">Загрузка информации...</div>
+    </div>
+  </div>
+
+  <script>
+    // Отображение информации о среде
+    document.getElementById('env-info').innerHTML = `
+      <p><strong>URL:</strong> ${window.location.href}</p>
+      <p><strong>User Agent:</strong> ${navigator.userAgent}</p>
+      <p><strong>Время загрузки:</strong> ${new Date().toLocaleString()}</p>
+    `;
+
+    // Функция для проверки API
+    async function checkApi() {
+      const resultElement = document.getElementById('api-result');
+      resultElement.innerHTML = 'Проверка API...';
+      
+      try {
+        const response = await fetch('/api/health');
+        
+        if (response.ok) {
+          const data = await response.json();
+          resultElement.innerHTML = `<p class="success">API доступно!</p>
+            <p>Ответ: ${JSON.stringify(data)}</p>`;
+        } else {
+          resultElement.innerHTML = `<p class="error">Ошибка API: ${response.status} ${response.statusText}</p>`;
+        }
+      } catch (error) {
+        resultElement.innerHTML = `<p class="error">Ошибка при обращении к API: ${error.message}</p>`;
+      }
+    }
+
+    // Функция для проверки статических файлов
+    async function checkStaticFiles() {
+      const resultElement = document.getElementById('static-result');
+      resultElement.innerHTML = 'Проверка статических файлов...';
+      
+      const files = [
+        '/manifest.json',
+        '/favicon.ico',
+        '/static/js/main.449f517d.js',
+        '/static/css/main.aeca2af9.css'
+      ];
+      
+      const results = [];
+      
+      for (const file of files) {
+        try {
+          const response = await fetch(file);
+          
+          if (response.ok) {
+            results.push(`<p class="success">✓ ${file}</p>`);
+          } else {
+            results.push(`<p class="error">✗ ${file} (${response.status})</p>`);
+          }
+        } catch (error) {
+          results.push(`<p class="error">✗ ${file} (${error.message})</p>`);
+        }
+      }
+      
+      resultElement.innerHTML = results.join('');
+    }
+  </script>
+</body>
+</html> 

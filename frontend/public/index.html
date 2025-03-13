@@ -25,6 +25,14 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
     <title>PriceManager</title>
+    <script>
+      // Отладочный скрипт
+      window.addEventListener('error', function(e) {
+        console.error('Глобальная ошибка JavaScript:', e.message, e.filename, e.lineno, e.colno, e.error);
+        document.body.innerHTML += '<div style="color:red; position:fixed; top:10px; left:10px; z-index:9999; background:white; padding:10px; border:1px solid #ccc;">Ошибка: ' + e.message + '</div>';
+      });
+      console.log('Приложение инициализируется в режиме отладки');
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
