@@ -42,6 +42,12 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
   const [uploadProgress, setUploadProgress] = useState(0);
   
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    console.log('Начало загрузки файла:', {
+      fileType,
+      fileName: acceptedFiles[0]?.name,
+      fileSize: acceptedFiles[0]?.size
+    });
+    
     // Проверяем, что был загружен только один файл
     if (acceptedFiles.length !== 1) {
       setError('Пожалуйста, загрузите только один файл.');
@@ -65,6 +71,7 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       // Шаг 1: Получаем URL для загрузки
       console.log('Запрос URL для прямой загрузки в Supabase');
       const { uploadUrl, fileInfo } = await fileService.getUploadUrl(file.name, fileType);
+      console.log('Получен URL и информация о файле:', { uploadUrl, fileInfo });
       
       // Шаг 2: Загружаем файл напрямую в Supabase
       console.log('Начало прямой загрузки в Supabase', uploadUrl);
@@ -72,6 +79,7 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       
       // Загрузка файла
       const uploadSuccess = await fileService.uploadToSupabase(file, uploadUrl);
+      console.log('Результат загрузки в Supabase:', uploadSuccess);
       
       if (!uploadSuccess) {
         throw new Error('Не удалось загрузить файл в Supabase');
@@ -81,17 +89,28 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
       console.log('Файл успешно загружен в Supabase');
       
       // Шаг 3: Регистрируем файл в нашем API
-      console.log('Регистрация файла в системе');
+      console.log('Регистрация файла в системе:', fileInfo);
       const registeredFileInfo = await fileService.registerUploadedFile(fileInfo);
-      
-      setUploadProgress(100);
       console.log('Файл успешно зарегистрирован:', registeredFileInfo);
       
+      setUploadProgress(100);
+      
+      // Вызываем колбэк с информацией о файле
+      console.log('Вызов onFileUploaded с данными:', registeredFileInfo);
       onFileUploaded(registeredFileInfo);
       setFileUploaded(true);
     } catch (err: any) {
-      setError(err.message || 'Произошла ошибка при загрузке файла.');
-      console.error('Ошибка при загрузке файла:', err);
+      const errorMessage = err.message || 'Произошла ошибка при загрузке файла.';
+      console.error('Ошибка при загрузке файла:', {
+        error: err,
+        message: errorMessage,
+        fileInfo: {
+          name: file.name,
+          type: fileType,
+          size: file.size
+        }
+      });
+      setError(errorMessage);
       setUploadProgress(0);
     } finally {
       setLoading(false);
