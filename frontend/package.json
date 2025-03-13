@@ -55,6 +55,8 @@
   "devDependencies": {
     "@types/node-fetch": "^2.6.11",
     "http-proxy-middleware": "^2.0.6",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "p-limit": "^6.2.0",
+    "yocto-queue": "^1.2.0"
   }
 }
