@@ -136,115 +136,62 @@ export const fileService = {
       
       // Проверка типа полученных данных для более детальной диагностики
       console.log('Тип полученных данных:', typeof response.data);
-      if (Array.isArray(response.data)) {
-        console.log('Данные являются массивом, длина:', response.data.length);
-      } else if (typeof response.data === 'object') {
-        console.log('Данные являются объектом, ключи:', Object.keys(response.data));
-      }
       
-      // Улучшенная обработка ответа с подробной диагностикой
       let columns: string[] = [];
+      const data = response.data;
       
-      // 1. Если это массив - используем напрямую
-      if (Array.isArray(response.data)) {
-        columns = response.data;
-        console.log('Обработка: получен массив напрямую');
-      } 
-      // 2. Если это объект - проверяем на наличие массива колонок
-      else if (response.data && typeof response.data === 'object') {
-        console.log('Обработка: получен объект, ищем массив колонок');
+      // Простая проверка - если это уже массив, используем его
+      if (Array.isArray(data)) {
+        columns = data;
+        console.log('Данные получены как массив:', columns);
+      }
+      // Если это объект с ключом columns, и columns - массив
+      else if (data && typeof data === 'object' && Array.isArray(data.columns)) {
+        columns = data.columns;
+        console.log('Данные получены как объект с массивом columns:', columns);
+      }
+      // Обработка старого формата API, когда возвращается просто объект
+      else if (data && typeof data === 'object') {
+        // Пробуем найти массив в объекте (в любом из полей)
+        const arrayFields = Object.entries(data)
+          .filter(([key, value]) => Array.isArray(value))
+          .map(([key, value]) => ({ key, value }));
         
-        // 2.1 Проверка на наличие ключа columns
-        if (Array.isArray(response.data.columns)) {
-          columns = response.data.columns;
-          console.log('Найден массив в ключе columns');
-        } 
-        // 2.2 Проверка на наличие ключа data
-        else if (response.data.data && Array.isArray(response.data.data)) {
-          columns = response.data.data;
-          console.log('Найден массив в ключе data');
+        if (arrayFields.length > 0) {
+          // Берем первый найденный массив
+          columns = arrayFields[0].value as string[];
+          console.log(`Найден массив в поле ${arrayFields[0].key}:`, columns);
         }
-        // 2.3 Поиск любого массива в объекте
+        // Если массивов нет, используем ключи объекта, исключая служебные поля
         else {
-          console.log('Ищем любой массив в объекте');
-          const arrayValues = Object.values(response.data).filter(val => Array.isArray(val));
+          const serviceFields = ['status', 'message', 'timestamp', 'path', 'error', 'detail'];
+          const usableKeys = Object.keys(data).filter(key => !serviceFields.includes(key));
           
-          if (arrayValues.length > 0) {
-            columns = arrayValues[0] as string[];
-            console.log('Найден массив в объекте:', columns);
-          }
-          // 2.4 Использование ключей объекта как колонок
-          else if (Object.keys(response.data).length > 0) {
-            console.log('Не найден массив, используем ключи объекта');
-            const keys = Object.keys(response.data).filter(key => 
-              !['status', 'message', 'timestamp', 'path', 'error', 'detail'].includes(key)
-            );
+          if (usableKeys.length > 0) {
+            columns = usableKeys;
+            console.log('Используем ключи объекта как колонки:', columns);
+          } else {
+            // Проверим, есть ли в объекте ключи status и message, что может указывать на ответ API без данных
+            if (data.status === 'ok' && data.message) {
+              console.warn('Получен ответ API без колонок:', data.message);
+              return []; // Возвращаем пустой массив
+            }
             
-            if (keys.length > 0) {
-              columns = keys;
-              console.log('Используем ключи объекта как колонки:', columns);
-            } else {
-              console.error('Нет подходящих ключей в объекте');
-              throw new Error('Неверный формат данных колонок: нет подходящих ключей');
-            }
-          } else {
-            console.error('Пустой объект в ответе');
-            throw new Error('Неверный формат данных колонок: пустой объект');
+            console.error('Нет подходящих данных для колонок в ответе:', data);
+            throw new Error('Невозможно извлечь колонки из ответа API');
           }
         }
       }
-      // 3. Если это строка - пробуем распарсить как JSON
-      else if (typeof response.data === 'string') {
-        console.log('Обработка: получена строка, пробуем распарсить как JSON');
-        try {
-          const parsedData = JSON.parse(response.data);
-          
-          if (Array.isArray(parsedData)) {
-            columns = parsedData;
-            console.log('Строка распарсена как массив');
-          } else if (parsedData && typeof parsedData === 'object') {
-            // Рекурсивно применяем ту же логику к распарсенному объекту
-            console.log('Строка распарсена как объект, ищем массив внутри');
-            if (Array.isArray(parsedData.columns)) {
-              columns = parsedData.columns;
-            } else if (parsedData.data && Array.isArray(parsedData.data)) {
-              columns = parsedData.data;
-            } else {
-              const keys = Object.keys(parsedData).filter(key => 
-                !['status', 'message', 'timestamp', 'path'].includes(key)
-              );
-              if (keys.length > 0) {
-                columns = keys;
-              } else {
-                throw new Error('Неверный формат данных колонок в строке JSON');
-              }
-            }
-          } else {
-            throw new Error('Неверный формат данных колонок в строке JSON');
-          }
-        } catch (parseError) {
-          // Если не удалось распарсить, используем строку как одну колонку
-          console.warn('Не удалось распарсить строку как JSON, используем как одну колонку');
-          columns = [response.data];
-        }
-      }
-      // 4. Если данные отсутствуют - ошибка
+      // В случае строки или других типов данных
       else {
-        console.error('Неизвестный формат данных:', response.data);
-        throw new Error(`Неверный формат данных колонок: ${typeof response.data}`);
+        console.error('Неподдерживаемый формат данных:', data);
+        throw new Error(`Неверный формат данных колонок: ${typeof data}`);
       }
       
-      // Преобразуем все элементы в строки
-      columns = columns.map(col => String(col).trim());
-      
-      // Удаляем пустые значения
-      columns = columns.filter(col => col !== '' && col !== 'undefined' && col !== 'null');
-      
-      // Проверка финального результата
-      if (columns.length === 0) {
-        console.error('После обработки не осталось колонок');
-        throw new Error('Не удалось извлечь колонки из ответа API');
-      }
+      // Преобразуем все элементы в строки и фильтруем пустые
+      columns = columns
+        .map(col => String(col).trim())
+        .filter(col => col !== '' && col !== 'undefined' && col !== 'null');
       
       console.log('Финальный список колонок:', columns);
       return columns;

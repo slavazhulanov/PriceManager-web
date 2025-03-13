@@ -335,8 +335,8 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         # Выводим колонки перед возвратом
         logger.debug(f"Возвращаемые колонки после обработки: {columns}")
         
-        # Возвращаем массив напрямую, так как в response_model указан List[str]
-        return columns
+        # Возвращаем колонки в формате JSON с ключом columns
+        return {"columns": columns}
     except ValueError as e:
         logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
