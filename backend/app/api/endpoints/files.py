@@ -298,17 +298,28 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
     """
     Получение списка колонок из файла
     """
-    # Получаем содержимое файла
-    file_content = get_file_content(filename)
-    if not file_content:
-        raise HTTPException(status_code=404, detail="Файл не найден")
-    
-    # Получаем расширение файла
-    extension = os.path.splitext(filename)[1]
-    
-    # Получаем колонки
-    columns = get_columns(file_content, extension, encoding, separator)
-    return columns
+    try:
+        # Получаем содержимое файла
+        file_content = get_file_content(filename)
+        if not file_content:
+            logger.error(f"Файл не найден: {filename}")
+            raise HTTPException(status_code=404, detail=f"Файл не найден: {filename}")
+        
+        # Получаем расширение файла
+        extension = os.path.splitext(filename)[1]
+        
+        # Получаем колонки
+        columns = get_columns(file_content, extension, encoding, separator)
+        
+        logger.info(f"Успешно получены колонки для файла {filename}: {columns}")
+        # Возвращаем список колонок напрямую, а не в обертке с status
+        return columns
+    except ValueError as e:
+        logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Внутренняя ошибка при получении колонок файла {filename}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка при получении колонок: {str(e)}")
 
 @router.post("/mapping", response_model=FileInfo)
 async def save_column_mapping(file_info: FileInfo):
