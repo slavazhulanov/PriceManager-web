@@ -132,15 +132,44 @@ export const fileService = {
     
     try {
       const response = await api.get(`files/columns/${filename}`, { params });
-      console.log('Получены колонки:', response.data);
+      console.log('Получены колонки (сырой ответ):', response.data);
       
-      // Проверяем, что response.data является массивом
-      if (!Array.isArray(response.data)) {
-        console.error('Неверный формат данных колонок:', response.data);
+      // Улучшенная обработка ответа - адаптируется к разным форматам ответа
+      let columns: string[] = [];
+      
+      if (Array.isArray(response.data)) {
+        // Если сервер вернул массив
+        columns = response.data;
+      } else if (response.data && typeof response.data === 'object') {
+        // Если сервер вернул объект, ищем массив внутри него
+        if (Array.isArray(response.data.columns)) {
+          columns = response.data.columns;
+        } else if (response.data.data && Array.isArray(response.data.data)) {
+          columns = response.data.data;
+        } else {
+          // Проверяем есть ли поля, которые являются массивами
+          const possibleColumns = Object.values(response.data).find(val => Array.isArray(val));
+          if (possibleColumns) {
+            columns = possibleColumns as string[];
+          } else {
+            // Если не нашли массивов, создадим из ключей объекта
+            console.warn('Не найден массив колонок, пробуем использовать ключи объекта');
+            const keys = Object.keys(response.data).filter(key => 
+              !['status', 'message', 'timestamp', 'path'].includes(key)
+            );
+            if (keys.length > 0) {
+              columns = keys;
+            } else {
+              throw new Error('Неверный формат данных колонок');
+            }
+          }
+        }
+      } else {
         throw new Error('Неверный формат данных колонок');
       }
       
-      return response.data;
+      console.log('Извлеченные колонки:', columns);
+      return columns;
     } catch (error: any) {
       console.error('Ошибка при получении колонок:', {
         status: error?.response?.status,

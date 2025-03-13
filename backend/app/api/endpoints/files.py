@@ -320,6 +320,10 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         columns = get_columns(file_content, extension, encoding, separator)
         
         logger.info(f"Успешно получены колонки для файла {filename}: {columns}")
+        # Дополнительно выводим текущее время для отладки
+        logger.debug(f"Текущее время при возврате ответа: {time.time()}")
+        
+        # Возвращаем массив напрямую, так как в response_model указан List[str]
         return columns
     except ValueError as e:
         logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")
