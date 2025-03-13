@@ -119,12 +119,29 @@ export const fileService = {
    * Получение списка колонок из файла
    */
   async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
+    console.log('Запрос колонок для файла:', {
+      filename,
+      encoding,
+      separator,
+      url: `files/columns/${filename}`
+    });
+    
     const params: any = {};
     if (encoding) params.encoding = encoding;
     if (separator) params.separator = separator;
     
-    const response = await api.get(`files/columns/${filename}`, { params });
-    return response.data;
+    try {
+      const response = await api.get(`files/columns/${filename}`, { params });
+      console.log('Получены колонки:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('Ошибка при получении колонок:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error.message
+      });
+      throw error;
+    }
   },
   
   /**

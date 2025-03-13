@@ -60,6 +60,13 @@ const FileUploadPage: React.FC = () => {
   
   // Загрузка колонок для файлов
   const loadColumns = useCallback(async () => {
+    console.log('Начало загрузки колонок', {
+      supplierFile,
+      storeFile,
+      supplierColumns,
+      storeColumns
+    });
+    
     setColumnsLoading(true);
     setError(null);
     
@@ -68,16 +75,24 @@ const FileUploadPage: React.FC = () => {
       if (supplierFile && !supplierColumns.length) {
         try {
           if (!supplierFile.stored_filename) {
-            console.error('Отсутствует stored_filename для файла поставщика');
+            console.error('Отсутствует stored_filename для файла поставщика', supplierFile);
             setError('Ошибка загрузки колонок: отсутствует имя файла');
             return;
           }
+          
+          console.log('Запрос колонок для файла поставщика:', {
+            stored_filename: supplierFile.stored_filename,
+            encoding: supplierFile.encoding,
+            separator: supplierFile.separator
+          });
           
           const columns = await fileService.getColumns(
             supplierFile.stored_filename,
             supplierFile.encoding,
             supplierFile.separator
           );
+          
+          console.log('Получены колонки для файла поставщика:', columns);
           setSupplierColumns(columns);
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла поставщика:', err);
@@ -89,26 +104,42 @@ const FileUploadPage: React.FC = () => {
       if (storeFile && !storeColumns.length) {
         try {
           if (!storeFile.stored_filename) {
-            console.error('Отсутствует stored_filename для файла магазина');
+            console.error('Отсутствует stored_filename для файла магазина', storeFile);
             setError('Ошибка загрузки колонок: отсутствует имя файла');
             return;
           }
+          
+          console.log('Запрос колонок для файла магазина:', {
+            stored_filename: storeFile.stored_filename,
+            encoding: storeFile.encoding,
+            separator: storeFile.separator
+          });
           
           const columns = await fileService.getColumns(
             storeFile.stored_filename,
             storeFile.encoding,
             storeFile.separator
           );
+          
+          console.log('Получены колонки для файла магазина:', columns);
           setStoreColumns(columns);
         } catch (err: any) {
           console.error('Ошибка загрузки колонок для файла магазина:', err);
           setError(`Ошибка загрузки колонок для файла магазина: ${err.message || err}`);
         }
       }
+    } catch (err: any) {
+      console.error('Общая ошибка при загрузке колонок:', err);
+      setError(`Ошибка при загрузке колонок: ${err.message || err}`);
     } finally {
       setColumnsLoading(false);
+      console.log('Завершение загрузки колонок', {
+        supplierColumns,
+        storeColumns,
+        error
+      });
     }
-  }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length]);
+  }, [fileService, supplierFile, storeFile, supplierColumns, storeColumns]);
   
   // При изменении файлов загружаем их колонки
   useEffect(() => {
@@ -117,12 +148,16 @@ const FileUploadPage: React.FC = () => {
   
   // Обработчик загрузки файла поставщика
   const handleSupplierFileUpload = (fileInfo: FileInfo) => {
+    console.log('Загружен файл поставщика:', fileInfo);
     setSupplierFile(fileInfo);
+    loadColumns(); // Загружаем колонки после загрузки файла
   };
   
   // Обработчик загрузки файла магазина
   const handleStoreFileUpload = (fileInfo: FileInfo) => {
+    console.log('Загружен файл магазина:', fileInfo);
     setStoreFile(fileInfo);
+    loadColumns(); // Загружаем колонки после загрузки файла
   };
   
   // Обработчик сохранения маппинга колонок для файла поставщика

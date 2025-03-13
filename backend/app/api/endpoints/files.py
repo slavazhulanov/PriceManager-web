@@ -298,17 +298,25 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
     """
     Получение списка колонок из файла
     """
+    logger.info(f"Запрос колонок для файла: {filename}, кодировка: {encoding}, разделитель: {separator}")
+    
     try:
         # Получаем содержимое файла
+        logger.debug(f"Получаем содержимое файла {filename}")
         file_content = get_file_content(filename)
+        
         if not file_content:
             logger.error(f"Файл не найден: {filename}")
             raise HTTPException(status_code=404, detail=f"Файл не найден: {filename}")
         
+        logger.debug(f"Получено содержимое файла {filename}, размер: {len(file_content)} байт")
+        
         # Получаем расширение файла
         extension = os.path.splitext(filename)[1]
+        logger.debug(f"Расширение файла: {extension}")
         
         # Получаем колонки
+        logger.debug(f"Извлекаем колонки из файла {filename}")
         columns = get_columns(file_content, extension, encoding, separator)
         
         logger.info(f"Успешно получены колонки для файла {filename}: {columns}")
@@ -318,8 +326,8 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Внутренняя ошибка при получении колонок файла {filename}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Внутренняя ошибка при получении колонок: {str(e)}")
+        logger.error(f"Неожиданная ошибка при получении колонок файла {filename}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Неожиданная ошибка при получении колонок: {str(e)}")
 
 @router.post("/mapping", response_model=FileInfo)
 async def save_column_mapping(file_info: FileInfo):
