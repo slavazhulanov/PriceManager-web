@@ -16,15 +16,17 @@ import traceback
 
 from app.api.api import api_router
 from app.core.config import settings
+from app.core.middleware import TraceMiddleware
 from app.services.file_service import cleanup_old_files
 from app.services.file_cache import clear_old_cache, get_cache_stats
+from app.services.log_rotation import rotate_logs
+from app.core.logger import get_logger
 
 # Настройка логирования
 settings.setup_logs_directory()
-logging_config = settings.get_logging_config()
-logging.config.dictConfig(logging_config)
 
-logger = logging.getLogger("app.main")
+# Инициализируем логгер
+logger = get_logger("app.main")
 
 # Инициализация планировщика
 scheduler = AsyncIOScheduler()
@@ -59,25 +61,36 @@ async def lifespan(app: FastAPI):
         kwargs={"max_age_days": 7}  # 7 дней
     )
     
+    # Добавляем задачу ротации логов (каждый день в 00:00)
+    scheduler.add_job(
+        rotate_logs,
+        'cron',
+        hour=0,
+        minute=0,
+        id='log_rotation',
+        name='Log Rotation Job'
+    )
+    
     scheduler.start()
     logger.info("Планировщик задач запущен")
     
     # Логируем информацию о запуске
     logger.info(f"Приложение запущено за {time.time() - start_time:.2f} секунд")
     
-    yield
-    
-    # Остановка приложения
-    logger.info("Остановка планировщика задач")
-    scheduler.shutdown()
-    
-    logger.info("Приложение остановлено")
+    try:
+        yield
+    finally:
+        # Остановка приложения
+        logger.info("Остановка планировщика задач")
+        scheduler.shutdown()
+        logger.info("Приложение остановлено")
 
 app = FastAPI(
     title=settings.APP_NAME,
     description=settings.DESCRIPTION,
     version=settings.VERSION,
-    lifespan=lifespan
+    lifespan=lifespan,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
 # Middleware для установки уникального идентификатора запроса
@@ -109,53 +122,34 @@ async def log_requests(request: Request, call_next: Callable):
         logger.error(f"[{request_id}] Ошибка при обработке {request.method} {request.url.path} - {str(e)}, Время: {process_time:.4f}s")
         raise
 
-# Добавление middleware CORS
-origins = settings.parse_cors_origins()
-logger.info(f"Настройка CORS для доменов: {origins}")
-
-# Валидация и фильтрация CORS origins для продакшн
-valid_origins = []
-for origin in origins:
-    # Проверка на потенциально опасные символы в origin
-    if '*' in origin and not origin.startswith('https://*.'):
-        logger.warning(f"Потенциально небезопасный CORS origin с wildcard: {origin}")
-    
-    # Проверка на использование HTTPS в продакшн
-    if settings.DEBUG is False and origin.startswith('http://') and not origin.startswith('http://localhost'):
-        logger.warning(f"Небезопасный HTTP origin в режиме продакшн: {origin}")
-    else:
-        valid_origins.append(origin)
-
-logger.info(f"Итоговый список CORS origins: {valid_origins}")
-
+# Настройка CORS
+logger.info(f"Настройка CORS для доменов: {settings.CORS_ORIGINS}")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=valid_origins,
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
+logger.info(f"Итоговый список CORS origins: {settings.CORS_ORIGINS}")
 
-# Включаем роутер API
-app.include_router(api_router, prefix=settings.API_V1_STR)
+# Подключаем API роутер с префиксом /api/v1
+app.include_router(api_router, prefix="/api/v1")
 
-# Добавляем маршрут диагностики для проверки состояния приложения
-@app.get("/health")
+# Также подключаем API роутер с префиксом /v1 для совместимости
+app.include_router(api_router, prefix="/v1")
+
+# Эндпоинт для проверки здоровья сервиса
+@app.get("/api/v1/health")
 async def health_check():
     """
-    Эндпоинт для проверки работоспособности приложения
+    Проверка работоспособности сервиса
     """
-    # Базовая информация о состоянии приложения
-    health_info = {
+    return {
         "status": "ok",
-        "app_name": settings.APP_NAME,
         "version": settings.VERSION,
-        "debug": settings.DEBUG,
-        "log_level": settings.LOG_LEVEL,
-        "cache": get_cache_stats()
+        "environment": "production"
     }
-    
-    return health_info
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

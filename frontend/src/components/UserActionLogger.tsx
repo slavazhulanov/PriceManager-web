@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
-import logger from '../services/logger';
+import { logger } from '../utils/logger';
 
 /**
  * Компонент для глобального отслеживания действий пользователя
@@ -8,6 +8,11 @@ import logger from '../services/logger';
  */
 export const UserActionLogger: React.FC = () => {
   const location = useLocation();
+  
+  // Добавляем тестовый лог при загрузке компонента
+  useEffect(() => {
+    logger.info('UserActionLogger component mounted', { path: location.pathname });
+  }, [location.pathname]);
   
   // Отслеживаем изменение URL
   useEffect(() => {

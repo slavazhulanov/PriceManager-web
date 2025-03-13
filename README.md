@@ -197,7 +197,8 @@ gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app
 
 2. Создайте файл `.env` в директории `frontend/`:
    ```
-   REACT_APP_USE_REAL_API=false  # установите true для использования реального API
+   # Базовый URL API (относительный путь для работы в локальном и продакшен окружении)
+   REACT_APP_API_URL=/api/v1
    ```
 
 ### Запуск бэкенда

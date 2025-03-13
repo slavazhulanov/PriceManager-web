@@ -16,6 +16,7 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -76,3 +77,21 @@ uploads/*
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Логи
+*.log
+backend/logs/*
+!backend/logs/.gitkeep
+
+# PID файлы
+*.pid
+
+# Временные файлы
+tmp/
+.tmp/
+temp/
+.temp/
+
+# Директории MCP
+.cursor/mcp*
+mcp_*/

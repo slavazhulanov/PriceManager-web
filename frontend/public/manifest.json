@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "PriceManager",
+  "name": "PriceManager - система управления ценами",
   "icons": [
     {
       "src": "favicon.ico",

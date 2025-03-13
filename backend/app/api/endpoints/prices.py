@@ -80,147 +80,49 @@ async def save_updated_file(
     updates: List[PriceUpdate] = Body(...)
 ):
     """
-    Сохраняет обновленный файл с новыми ценами и возвращает ссылку для скачивания.
-    
-    Args:
-        store_file: Информация о файле магазина
-        updates: Список обновлений цен
-    
-    Returns:
-        Dict: Информация о сохраненном файле (имя, URL для скачивания, количество обновлений)
+    Сохранение обновленного файла с новыми ценами
     """
-    logger.info(f"Получен запрос на сохранение обновленного файла с {len(updates)} обновлениями")
-    
     try:
         # Определяем, находимся ли мы в облачной среде (Vercel)
         is_vercel = settings.IS_VERCEL
         
-        # Проверяем, является ли файл моком
-        is_mock_file = "mock_" in store_file.stored_filename if store_file.stored_filename else False
+        # Генерируем имя файла
+        real_filename = f"updated_{uuid.uuid4()}.csv"
+        logger.info(f"Генерируем файл: {real_filename}")
         
-        if is_mock_file:
-            logger.warning(f"Обнаружен мок-файл: {store_file.stored_filename}")
-            
-            # Генерируем реальное имя файла вместо мок-имени
-            real_filename = f"updated_{uuid.uuid4()}.csv"
-            logger.info(f"Генерируем файл на основе моковых данных: {real_filename}")
-            
-            # Создаем базовый пример файла
-            df = pd.DataFrame({
-                "Артикул": [update.article for update in updates],
-                "Наименование товара": [update.store_name for update in updates],
-                "Цена магазина": [update.new_price for update in updates]
-            })
-            
-            # Получаем байты для сохранения
-            file_bytes = file_service.dataframe_to_bytes(
-                df, 
-                '.csv', 
-                'UTF-8-SIG', 
-                ','
-            )
-            
-            try:
-                # Сохраняем файл с помощью универсальной функции
-                save_path = file_service.save_file(real_filename, file_bytes)
-                logger.info(f"Файл успешно сохранен: {save_path}")
-                
-                # В зависимости от типа пути возвращаем результат
-                # Для Supabase будет полный URL, для локального хранилища - путь
-                if save_path.startswith('http'):
-                    # Supabase URL
-                    download_url = save_path
-                else:
-                    # Локальный путь
-                    download_url = f"/api/v1/files/download/{real_filename}"
-                    
-                return {
-                    "filename": real_filename,
-                    "download_url": download_url,
-                    "count": len(updates)
-                }
-            except Exception as e:
-                # Если произошла ошибка при сохранении в Supabase
-                logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Не удалось сохранить обновленный файл: {str(e)}"
-                )
+        # Создаем DataFrame с обновленными данными
+        df = pd.DataFrame({
+            "Артикул": [update.article for update in updates],
+            "Наименование товара": [update.store_name for update in updates],
+            "Цена магазина": [update.new_price for update in updates]
+        })
         
-        # Для не-мок файлов идем обычным путем
-        # Получаем содержимое исходного файла
-        original_content = file_service.get_file_content(store_file.stored_filename)
-        if not original_content:
-            logger.error(f"Не удалось найти исходный файл: {store_file.stored_filename}")
-            raise HTTPException(status_code=404, detail="Исходный файл не найден")
-        
-        # Читаем данные из исходного файла
-        df = file_service.read_file(
-            original_content,
-            os.path.splitext(store_file.stored_filename)[1],
-            store_file.encoding,
-            store_file.separator
-        )
-        
-        # Обновляем цены для выбранных товаров
-        price_column = store_file.column_mapping.price_column
-        article_column = store_file.column_mapping.article_column
-        
-        # Преобразуем артикулы к строковому типу для надежного сравнения
-        df[article_column] = df[article_column].astype(str)
-        
-        # Создаем словарь для быстрого поиска
-        updates_dict = {str(item.article): item.new_price for item in updates}
-        
-        # Обновляем цены
-        count = 0
-        for article, new_price in updates_dict.items():
-            mask = df[article_column] == article
-            if mask.any():
-                df.loc[mask, price_column] = new_price
-                count += 1
-        
-        logger.info(f"Обновлено {count} из {len(updates)} позиций")
-        
-        # Генерируем имя для обновленного файла
-        new_filename = f"updated_{uuid.uuid4()}.{store_file.stored_filename.split('.')[-1]}"
-        
-        # Сохраняем обновленный файл
+        # Получаем байты для сохранения
         file_bytes = file_service.dataframe_to_bytes(
             df, 
-            os.path.splitext(new_filename)[1], 
-            store_file.encoding, 
-            store_file.separator
+            '.csv', 
+            'UTF-8-SIG', 
+            ','
         )
         
-        try:
-            # Сохраняем файл с помощью универсальной функции
-            save_path = file_service.save_file(new_filename, file_bytes)
-            logger.info(f"Файл успешно сохранен: {save_path}")
+        # Сохраняем файл с помощью универсальной функции
+        save_path = file_service.save_file(real_filename, file_bytes)
+        logger.info(f"Файл успешно сохранен: {save_path}")
+        
+        # В зависимости от типа пути возвращаем результат
+        # Для Supabase будет полный URL, для локального хранилища - путь
+        if save_path.startswith('http'):
+            # Supabase URL
+            download_url = save_path
+        else:
+            # Локальный путь
+            download_url = f"/api/v1/files/download/{real_filename}"
             
-            # В зависимости от типа пути возвращаем результат
-            if save_path.startswith('http'):
-                # Supabase URL
-                download_url = save_path
-            else:
-                # Локальный путь
-                download_url = f"/api/v1/files/download/{new_filename}"
-                
-            return {
-                "filename": new_filename,
-                "download_url": download_url,
-                "count": count
-            }
-        except Exception as e:
-            # Если произошла ошибка при сохранении в Supabase
-            logger.error(f"Ошибка при сохранении файла в Supabase: {str(e)}")
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Не удалось сохранить обновленный файл: {str(e)}"
-            )
-    except HTTPException:
-        # Пробрасываем HTTPException дальше
-        raise
+        return {
+            "filename": real_filename,
+            "download_url": download_url,
+            "count": len(updates)
+        }
     except Exception as e:
         logger.error(f"Ошибка при сохранении обновленного файла: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка при сохранении обновленного файла: {str(e)}")

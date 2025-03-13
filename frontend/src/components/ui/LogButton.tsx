@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button, ButtonProps } from '@mui/material';
-import logger from '../../services/logger';
+import { logger } from '../../utils/logger';
 
 interface LogButtonProps extends ButtonProps {
   /**

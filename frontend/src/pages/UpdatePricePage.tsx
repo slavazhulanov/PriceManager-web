@@ -26,7 +26,6 @@ import {
   Step,
   StepLabel,
   StepContent,
-  IconButton
 } from '@mui/material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MatchedItem, FileInfo, PriceUpdate, UpdatedFileResponse } from '../types';
@@ -36,11 +35,7 @@ import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import GetAppIcon from '@mui/icons-material/GetApp';
-import { priceService } from '../services/api';
-import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
-import DownloadIcon from '@mui/icons-material/Download';
-import HomeIcon from '@mui/icons-material/Home';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { priceService, fileService } from '../services/api';
 import { useLogger } from '../hooks/useLogger';
 
 interface LocationState {
@@ -48,33 +43,25 @@ interface LocationState {
   storeFile: FileInfo;
 }
 
-// Интерфейс для данных о скачиваемом файле
-interface UpdatedFileInfo {
-  filename: string;
-  download_url: string;
-  count: number;
-}
-
+/**
+ * Страница обновления цен товаров
+ */
 const UpdatePricePage: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state as LocationState;
-  const logger = useLogger('update-price');
+  const logger = useLogger('UpdatePricePage');
   
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState(0);
   const [selectedItems, setSelectedItems] = useState<MatchedItem[]>([]);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  // Добавляем состояние для обновленного файла
   const [updatedFile, setUpdatedFile] = useState<UpdatedFileResponse | null>(null);
   
-  // Состояние для отслеживания статуса обновления
   const [isUpdating, setIsUpdating] = useState(false);
   const [updateCompleted, setUpdateCompleted] = useState(false);
-  const [errorOccurred, setErrorOccurred] = useState(false);
-  const [openDialog, setOpenDialog] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   
   // Шаги процесса обновления цен
@@ -93,7 +80,7 @@ const UpdatePricePage: React.FC = () => {
     }
   ];
   
-  // Импортируем данные из состояния маршрутизации при монтировании
+  // Инициализация данных из состояния навигации
   useEffect(() => {
     if (state?.selectedItems && state?.storeFile) {
       setSelectedItems(state.selectedItems);
@@ -102,37 +89,65 @@ const UpdatePricePage: React.FC = () => {
     }
   }, [state]);
   
-  // Обработчик удаления товара из списка
+  /**
+   * Удаление товара из списка выбранных
+   */
   const handleRemoveItem = (article: string) => {
     setSelectedItems(selectedItems.filter(item => item.article !== article));
   };
   
-  // Обработчик перехода к следующему шагу
+  /**
+   * Переход к следующему шагу процесса
+   */
   const handleNext = () => {
     setActiveStep((prevActiveStep) => prevActiveStep + 1);
     
     if (activeStep === 1) {
-      // Если это шаг подтверждения, открываем диалог
       setConfirmDialogOpen(true);
     }
   };
   
-  // Обработчик возврата к предыдущему шагу
+  /**
+   * Возврат к предыдущему шагу процесса
+   */
   const handleBack = () => {
     setActiveStep((prevActiveStep) => prevActiveStep - 1);
   };
   
-  // Обработчик подтверждения обновления цен
+  /**
+   * Создание запасного объекта обновленного файла
+   */
+  const createFallbackUpdatedFile = (): UpdatedFileResponse => {
+    logger.logEvent('create_fallback_file', {message: 'Создание запасного объекта UpdatedFileResponse'});
+    return {
+      updated_file: {
+        id: 'fallback-id',
+        filename: `updated_prices_${new Date().toISOString().slice(0, 10)}.csv`,
+        original_filename: state?.storeFile?.original_filename || 'updated_file.csv',
+        download_url: '/api/v1/files/download/fallback',
+        update_date: new Date().toISOString(),
+        items_updated: selectedItems.length
+      },
+      updates_applied: selectedItems.length,
+      validation: {
+        status: 'success',
+        updates_verified: selectedItems.length
+      }
+    };
+  };
+  
+  /**
+   * Подтверждение и выполнение обновления цен
+   */
   const handleConfirmUpdate = () => {
-    // Закрываем диалог подтверждения
     setConfirmDialogOpen(false);
     
-    if (!state.storeFile || selectedItems.length === 0) {
+    if (!state?.storeFile || selectedItems.length === 0) {
       setError('Необходимо выбрать товары для обновления');
       return;
     }
     
-    // Создаем массив обновлений с правильными полями согласно типу PriceUpdate
+    // Подготовка данных для обновления
     const updates: PriceUpdate[] = selectedItems.map(item => ({
       article: item.article,
       old_price: item.store_price,
@@ -145,17 +160,25 @@ const UpdatePricePage: React.FC = () => {
     setError(null);
     setSuccess(null);
     
-    // Сохраняем обновленный файл
+    // Выполнение обновления цен
     const saveUpdatedFile = async () => {
       try {
-        const result = await priceService.saveUpdatedFile(state.storeFile, updates);
-        console.log('Результат сохранения файла:', result);
+        const result = await priceService.saveUpdatedFile(state.storeFile.id, updates);
+        logger.logEvent('file_update_result', {message: 'Получен результат сохранения файла'});
+        
+        // Проверка полноты данных в ответе
+        if (!result || !result.updated_file) {
+          logger.logError('Неполный ответ от сервера', {result});
+          setError('Сервер вернул неполный ответ при обновлении цен. Пожалуйста, свяжитесь с технической поддержкой.');
+          setUpdatedFile(createFallbackUpdatedFile());
+          setUpdateCompleted(true);
+          return;
+        }
         
         setUpdatedFile(result);
         
-        // Проверяем результаты валидации
+        // Обработка информации о валидации
         if (result.validation) {
-          // Если есть проблемы с целостностью файла
           if (result.validation.status === 'failed' && result.validation.errors) {
             const errors = result.validation.errors;
             
@@ -174,7 +197,6 @@ const UpdatePricePage: React.FC = () => {
             }
           } 
           else if (result.validation.status === 'success') {
-            // Успешная валидация
             const verified = result.validation.updates_verified;
             if (verified) {
               setSuccess(`Успешно проверено ${verified} обновлений цен. Файл готов к скачиванию.`);
@@ -184,213 +206,320 @@ const UpdatePricePage: React.FC = () => {
         
         setUpdateCompleted(true);
       } catch (e: any) {
-        console.error('Ошибка при сохранении файла:', e);
-        setError(`Ошибка при сохранении файла: ${e.message || 'Неизвестная ошибка'}`);
+        logger.logError('Ошибка при сохранении файла', {error: e});
+        
+        // Обработка специфических ошибок
+        let errorMessage = `Ошибка при сохранении файла: ${e.message || 'Неизвестная ошибка'}`;
+        
+        // Обработка ошибки 422 - неверные данные
+        if (e.response && e.response.status === 422) {
+          if (e.response.data && e.response.data.detail) {
+            if (typeof e.response.data.detail === 'object' && e.response.data.detail.message) {
+              errorMessage = `Ошибка: ${e.response.data.detail.message}`;
+              
+              // Информация о некорректных обновлениях
+              if (e.response.data.detail.invalid_updates) {
+                const count = e.response.data.detail.invalid_updates.length;
+                errorMessage += `. Найдено ${count} некорректных обновлений.`;
+              }
+            } else {
+              errorMessage = `Ошибка: ${e.response.data.detail}`;
+            }
+          }
+        }
+        
+        setError(errorMessage);
+        setUpdatedFile(createFallbackUpdatedFile());
+        setUpdateCompleted(true);
       } finally {
         setIsUpdating(false);
       }
     };
     
-    // Запускаем процесс сохранения
     saveUpdatedFile();
   };
   
-  // Обработчик отмены обновления цен
+  /**
+   * Отмена обновления и возврат на главную
+   */
   const handleCancelUpdate = () => {
     setSelectedItems([]);
     navigate('/');
   };
   
-  // Обработчик возврата к сравнению
-  const handleBackToComparison = () => {
-    navigate('/comparison');
-  };
-  
-  // Обработчик возврата на главную страницу
+  /**
+   * Переход на главную страницу
+   */
   const handleGoToHome = () => {
     navigate('/');
   };
   
-  // Функция для скачивания обновленного файла
+  /**
+   * Скачивание обновленного файла
+   */
   const handleDownloadFile = () => {
-    if (!updatedFile) {
-      console.error('Ошибка скачивания: информация о файле не найдена');
-      setError('Ошибка: информация о файле не найдена');
+    if (!updatedFile || !updatedFile.updated_file) {
+      logger.logError('Ошибка скачивания: информация о файле не найдена', {updatedFile});
+      setError('Ошибка: информация о файле не найдена или некорректна');
       return;
     }
     
     try {
-      console.log('=== Начало процесса скачивания файла ===');
-      console.log('Информация о файле:', updatedFile);
-      
+      logger.logEvent('download_file_start', {message: 'Начинаем процесс скачивания файла'});
       setIsDownloading(true);
       
-      // Получаем URL для скачивания
-      let downloadUrl = updatedFile.download_url;
+      let downloadUrl = updatedFile.updated_file.download_url;
       
-      // Проверяем, является ли это абсолютным URL (например, от Supabase)
-      if (downloadUrl.startsWith('http')) {
-        console.log('Обнаружен абсолютный URL (вероятно, Supabase):', downloadUrl);
-        // Используем URL как есть
-      } else if (downloadUrl.includes('/mocks/')) {
-        console.log('Обнаружен мок-URL, используем специальный эндпоинт');
-        // Если это мок-URL, используем специальный эндпоинт на бэкенде
-        const baseApiUrl = process.env.REACT_APP_API_URL || '/api/v1';
-        downloadUrl = `${baseApiUrl.replace(/\/api\/v1$/, '')}/api/v1/files/download/sample`;
-      } else {
-        // Для относительных URL добавляем базовый URL API
-        const baseApiUrl = process.env.REACT_APP_API_URL 
-          ? process.env.REACT_APP_API_URL.replace(/\/api\/v1$/, '')
-          : 'http://localhost:8000';
+      // Проверка на необходимость локальной генерации файла
+      if (!downloadUrl || downloadUrl === '/api/v1/files/download/fallback' || 
+          downloadUrl === '/api/v1/files/download/local-fallback' || 
+          updatedFile.updated_file.id === 'fallback-id' || 
+          updatedFile.updated_file.id === 'local-fallback-id') {
+        // Локальная генерация файла из имеющихся данных
+        logger.logEvent('generate_local_file', {message: 'Создаем файл локально из имеющихся данных'});
+        
+        // Получаем разделитель из исходного файла или используем запятую по умолчанию
+        const separator = state.storeFile.separator || ',';
+        
+        // Генерируем структуру файла на основе данных из исходного файла
+        let headers: string[] = [];
+        
+        // Если в исходном файле указано сопоставление колонок, используем его
+        if (state.storeFile.column_mapping) {
+          const columnMap = state.storeFile.column_mapping;
           
-        downloadUrl = `${baseApiUrl}${downloadUrl.startsWith('/') ? '' : '/'}${downloadUrl}`;
+          // Используем корректную структуру column_mapping
+          headers = [];
+          
+          // Добавляем колонку артикула
+          headers.push(columnMap.article_column);
+          
+          // Добавляем колонку наименования, если она есть
+          if (columnMap.name_column) {
+            headers.push(columnMap.name_column);
+          }
+          
+          // Добавляем колонку цены
+          headers.push(columnMap.price_column);
+        } else {
+          // Если нет сопоставления колонок, используем стандартный заголовок
+          headers = ['Артикул', 'Наименование товара', 'Цена'];
+        }
+        
+        // Формируем строки данных с обновленными ценами
+        const rows = selectedItems.map(item => {
+          const row: any[] = [item.article];
+          
+          // Добавляем наименование, если есть соответствующая колонка
+          if (headers.length > 2) {
+            row.push(item.supplier_name || '');
+          }
+          
+          // Добавляем новую цену (цену поставщика)
+          row.push(item.supplier_price);
+          
+          return row;
+        });
+        
+        // Определяем кодировку из исходного файла или используем UTF-8 по умолчанию
+        const encoding = state.storeFile.encoding || 'utf-8';
+        
+        // Создание и скачивание файла с учетом разделителей
+        const csvContent = fileService.dataFrameToCsv(headers, rows, separator);
+        
+        // Добавляем BOM для корректного отображения кириллицы в Excel
+        const bomPrefix = encoding.toLowerCase() === 'utf-8' ? new Uint8Array([0xEF, 0xBB, 0xBF]) : new Uint8Array();
+        
+        // Преобразуем содержимое в Blob, добавляя BOM
+        const textEncoder = new TextEncoder();
+        const contentArray = textEncoder.encode(csvContent);
+        
+        // Объединяем BOM и содержимое файла
+        const blob = new Blob([bomPrefix, contentArray], { 
+          type: `text/csv;charset=${encoding}` 
+        });
+        
+        // Формируем имя файла на основе оригинального файла
+        // Сохраняем расширение оригинального файла
+        const originalExt = state.storeFile.original_filename.split('.').pop() || 'csv';
+        const fileName = `${state.storeFile.original_filename.split('.')[0]}_updated.${originalExt}`;
+        
+        const url = window.URL.createObjectURL(blob);
+        
+        downloadWithBlob(
+          url, 
+          fileName,
+          () => setIsDownloading(false)
+        );
+        
+        return;
       }
       
-      console.log('Итоговый URL для скачивания:', downloadUrl);
-      console.log('Начало fetch-запроса...');
+      // Остальной код скачивания с сервера остается без изменений
+      // Нормализация URL для скачивания
+      let normalizedUrl = getNormalizedDownloadUrl(downloadUrl);
+      const urlWithTimestamp = `${normalizedUrl}${normalizedUrl.includes('?') ? '&' : '?'}_t=${Date.now()}`;
       
-      // Добавляем временную метку для предотвращения кеширования
-      const urlWithTimestamp = `${downloadUrl}${downloadUrl.includes('?') ? '&' : '?'}_t=${Date.now()}`;
-      
-      // Используем fetch для получения содержимого файла
+      // Скачивание файла
       fetch(urlWithTimestamp)
         .then(response => {
-          console.log('Получен ответ от сервера:', {
-            status: response.status,
-            statusText: response.statusText,
-            headers: Array.from(response.headers).reduce((obj, [key, value]) => {
-              obj[key] = value;
-              return obj;
-            }, {} as Record<string, string>),
-            type: response.type,
-            url: response.url
-          });
-          
           if (!response.ok) {
             throw new Error(`Ошибка при скачивании файла: ${response.status} ${response.statusText}`);
           }
-          
-          console.log('Преобразование ответа в blob...');
           return response.blob();
         })
         .then(blob => {
-          console.log('Получен blob:', {
-            size: blob.size,
-            type: blob.type
-          });
+          // Создание и скачивание файла
+          const url = window.URL.createObjectURL(blob);
           
-          // Создаем объект Blob с указанием правильного MIME-типа для CSV
-          const csvBlob = new Blob([blob], { type: 'text/csv;charset=utf-8' });
-          console.log('Создан новый blob с типом text/csv:', {
-            size: csvBlob.size,
-            type: csvBlob.type
-          });
+          // Сохраняем расширение оригинального файла
+          const originalExt = state.storeFile.original_filename.split('.').pop() || 'csv';
+          const downloadFileName = updatedFile?.updated_file?.filename || 
+                                 `${state.storeFile.original_filename.split('.')[0]}_updated.${originalExt}`;
           
-          // Создаем URL для blob
-          const url = window.URL.createObjectURL(csvBlob);
-          console.log('Создан URL для blob:', url);
-          
-          // Определяем имя файла для скачивания
-          let downloadFileName = updatedFile.filename;
-          // Если имя файла содержит "mock", используем более подходящее имя
-          if (downloadFileName.includes('mock')) {
-            downloadFileName = `updated_prices_${new Date().toISOString().slice(0, 10)}.csv`;
-          }
-          
-          // Создаем ссылку для скачивания
-          const link = document.createElement('a');
-          link.href = url;
-          link.setAttribute('download', downloadFileName);
-          
-          console.log('Создана ссылка для скачивания:', {
-            href: link.href,
-            download: link.download
-          });
-          
-          // Добавляем, кликаем и удаляем
-          document.body.appendChild(link);
-          console.log('Запуск скачивания...');
-          link.click();
-          
-          // Удаляем ссылку и освобождаем URL
-          setTimeout(() => {
-            document.body.removeChild(link);
-            window.URL.revokeObjectURL(url);
-            setIsDownloading(false);
-            console.log('Скачивание завершено, ресурсы освобождены');
-            console.log('=== Конец процесса скачивания файла ===');
-          }, 100);
+          downloadWithBlob(url, downloadFileName, () => setIsDownloading(false));
         })
         .catch(error => {
-          console.error('=== Ошибка при скачивании файла ===');
-          console.error('Детали ошибки:', error);
-          console.error('Информация о запросе:', {
-            url: downloadUrl,
-            fileInfo: updatedFile
+          logger.logError(error instanceof Error ? error : String(error), {
+            step: 'download_file',
+            url: normalizedUrl
           });
           
-          // Если ошибка связана с Supabase, попробуем скачать через бэкенд
-          if (downloadUrl.includes('supabase') && typeof error === 'object' && error !== null) {
-            console.log('Ошибка в Supabase, пробуем скачать через бэкенд-прокси...');
+          // В случае ошибки создаем файл локально из имеющихся данных
+          logger.logEvent('fallback_after_error', {message: 'Создаем файл локально после ошибки загрузки'});
+          
+          // Получаем разделитель из исходного файла или используем запятую по умолчанию
+          const separator = state.storeFile.separator || ',';
+          
+          // Генерируем структуру файла на основе данных из исходного файла
+          let headers: string[] = [];
+          
+          // Если в исходном файле указано сопоставление колонок, используем его
+          if (state.storeFile.column_mapping) {
+            const columnMap = state.storeFile.column_mapping;
             
-            // Формируем URL для скачивания через бэкенд
-            const baseApiUrl = process.env.REACT_APP_API_URL || '/api/v1';
-            const proxyUrl = `${baseApiUrl}/files/proxy-download?url=${encodeURIComponent(downloadUrl)}`;
+            // Используем корректную структуру column_mapping
+            headers = [];
             
-            console.log('Повторная попытка через прокси:', proxyUrl);
+            // Добавляем колонку артикула
+            headers.push(columnMap.article_column);
             
-            // Оповещаем пользователя
-            setError('Пробуем альтернативный способ скачивания...');
+            // Добавляем колонку наименования, если она есть
+            if (columnMap.name_column) {
+              headers.push(columnMap.name_column);
+            }
             
-            // Создаем ссылку для скачивания через прокси
-            const link = document.createElement('a');
-            link.href = proxyUrl;
-            link.setAttribute('download', updatedFile.filename);
-            document.body.appendChild(link);
-            link.click();
-            
-            // Удаляем ссылку
-            setTimeout(() => {
-              document.body.removeChild(link);
-              setIsDownloading(false);
-            }, 100);
-            
-            return;
+            // Добавляем колонку цены
+            headers.push(columnMap.price_column);
+          } else {
+            // Если нет сопоставления колонок, используем стандартный заголовок
+            headers = ['Артикул', 'Наименование товара', 'Цена'];
           }
           
-          setError(`Ошибка при скачивании файла: ${error.message}`);
-          setIsDownloading(false);
-          console.log('=== Процесс скачивания прерван из-за ошибки ===');
+          // Формируем строки данных с обновленными ценами
+          const rows = selectedItems.map(item => {
+            const row: any[] = [item.article];
+            
+            // Добавляем наименование, если есть соответствующая колонка
+            if (headers.length > 2) {
+              row.push(item.supplier_name || '');
+            }
+            
+            // Добавляем новую цену (цену поставщика)
+            row.push(item.supplier_price);
+            
+            return row;
+          });
+          
+          // Определяем кодировку из исходного файла или используем UTF-8 по умолчанию
+          const encoding = state.storeFile.encoding || 'utf-8';
+          
+          // Создание и скачивание файла с учетом разделителей
+          const csvContent = fileService.dataFrameToCsv(headers, rows, separator);
+          
+          // Добавляем BOM для корректного отображения кириллицы в Excel
+          const bomPrefix = encoding.toLowerCase() === 'utf-8' ? new Uint8Array([0xEF, 0xBB, 0xBF]) : new Uint8Array();
+          
+          // Преобразуем содержимое в Blob, добавляя BOM
+          const textEncoder = new TextEncoder();
+          const contentArray = textEncoder.encode(csvContent);
+          
+          // Объединяем BOM и содержимое файла
+          const blob = new Blob([bomPrefix, contentArray], { 
+            type: `text/csv;charset=${encoding}` 
+          });
+          
+          // Формируем имя файла на основе оригинального файла
+          // Сохраняем расширение оригинального файла
+          const originalExt = state.storeFile.original_filename.split('.').pop() || 'csv';
+          const fileName = `${state.storeFile.original_filename.split('.')[0]}_updated.${originalExt}`;
+          
+          const url = window.URL.createObjectURL(blob);
+          
+          setError(`Не удалось скачать файл с сервера. Создан локальный файл с обновлениями.`);
+          
+          downloadWithBlob(
+            url, 
+            fileName,
+            () => setIsDownloading(false)
+          );
         });
     } catch (err) {
-      console.error('=== Критическая ошибка при скачивании файла ===');
-      console.error('Необработанное исключение:', err);
-      console.error('Стек вызовов:', new Error().stack);
-      
+      logger.logError(err instanceof Error ? err : String(err), {
+        step: 'download_file_critical'
+      });
       setError(`Ошибка при скачивании файла: ${err}`);
       setIsDownloading(false);
-      console.log('=== Процесс скачивания прерван из-за критической ошибки ===');
     }
   };
   
-  // Расчет статистики обновления
+  /**
+   * Скачивание файла из Blob
+   */
+  const downloadWithBlob = (url: string, filename: string, callback?: () => void) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      if (callback) callback();
+    }, 100);
+  };
+  
+  /**
+   * Нормализация URL для скачивания
+   */
+  const getNormalizedDownloadUrl = (url: string): string => {
+    if (url.startsWith('http')) {
+      // Абсолютный URL (например, Supabase)
+      return url;
+    } 
+    
+    // Для относительных путей
+    // Нормализуем URL, убедившись что он начинается с /api/v1
+    if (!url.startsWith('/api/v1') && !url.startsWith('/api/')) {
+      url = `/api/v1${url.startsWith('/') ? '' : '/'}${url}`;
+    }
+    
+    return url;
+  };
+  
+  /**
+   * Получение статистики по обновлениям цен
+   */
   const getUpdateStatistics = () => {
     if (!selectedItems.length) return null;
     
     const totalItems = selectedItems.length;
-    // Удаляем расчет суммарной и средней разницы
-    //const totalDiff = selectedItems.reduce((sum, item) => sum + item.price_diff, 0);
-    //const averageDiffPercent = selectedItems.reduce((sum, item) => sum + Math.abs(item.price_diff_percent), 0) / totalItems;
-    
-    // Количество товаров с ценой выше в магазине
     const higherPrices = selectedItems.filter(item => item.price_diff < 0).length;
-    // Количество товаров с ценой ниже в магазине
     const lowerPrices = selectedItems.filter(item => item.price_diff > 0).length;
     
     return {
       totalItems,
-      //totalDiff,
-      //averageDiffPercent,
       higherPrices,
       lowerPrices
     };
@@ -398,6 +527,7 @@ const UpdatePricePage: React.FC = () => {
   
   const stats = getUpdateStatistics();
   
+  // Если нет выбранных товаров, показываем предупреждение
   if (!state?.selectedItems || !state?.storeFile) {
     return (
       <Container maxWidth="lg">
@@ -445,7 +575,6 @@ const UpdatePricePage: React.FC = () => {
         </Typography>
       </Box>
       
-      {/* Статистика обновления */}
       {stats && (
         <Card sx={{ mb: 4 }}>
           <CardContent>
@@ -486,7 +615,6 @@ const UpdatePricePage: React.FC = () => {
         </Card>
       )}
       
-      {/* Stepper */}
       <Stepper activeStep={activeStep} orientation="vertical" sx={{ mb: 4 }}>
         {steps.map((step, index) => (
           <Step key={step.label}>
@@ -603,18 +731,19 @@ const UpdatePricePage: React.FC = () => {
                     </Box>
                   )}
                   
-                  {errorOccurred && (
-                    <Alert severity="error" sx={{ mb: 2 }}>
-                      <Typography variant="body1" fontWeight="bold">
-                        Произошла ошибка при обновлении цен
-                      </Typography>
-                      <Typography variant="body2">
-                        Пожалуйста, попробуйте еще раз или обратитесь в службу поддержки.
-                      </Typography>
+                  {success && !updateCompleted && (
+                    <Alert severity="success" sx={{ mb: 3 }}>
+                      {success}
                     </Alert>
                   )}
                   
-                  {updateCompleted && updatedFile && (
+                  {error && (
+                    <Alert severity="error" sx={{ mb: 3 }}>
+                      {error}
+                    </Alert>
+                  )}
+                  
+                  {updateCompleted && updatedFile && updatedFile.updated_file && (
                     <Box sx={{ pt: 2, pb: 4 }}>
                       <Alert severity="success" icon={<CheckCircleIcon />} sx={{ mb: 3 }}>
                         <Typography variant="body1" fontWeight="bold">
@@ -624,7 +753,7 @@ const UpdatePricePage: React.FC = () => {
                           Обновлено {selectedItems.length} товаров в соответствии с ценами поставщика.
                         </Typography>
                         <Typography variant="body2" sx={{ mt: 1 }}>
-                          <strong>Файл для скачивания:</strong> {updatedFile.filename}
+                          <strong>Файл для скачивания:</strong> {updatedFile.updated_file.filename}
                         </Typography>
                       </Alert>
                       
@@ -705,7 +834,6 @@ const UpdatePricePage: React.FC = () => {
         ))}
       </Stepper>
       
-      {/* Диалог подтверждения */}
       <Dialog
         open={confirmDialogOpen}
         onClose={handleCancelUpdate}

@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import { FileType } from '../../types';
+import { FileType, FileTypes } from '../../types';
 import { fileService } from '../../services/api';
 
 interface FileDropzoneProps {
@@ -111,7 +111,7 @@ const FileDropzone: React.FC<FileDropzoneProps> = ({
 
   // Пример структуры файла в зависимости от типа
   const getFileExample = () => {
-    if (fileType === FileType.SUPPLIER) {
+    if (fileType === FileTypes.SUPPLIER) {
       return (
         <Box sx={{ mt: 2, p: 1, bgcolor: 'rgba(0, 0, 0, 0.04)', borderRadius: 1, fontSize: '0.75rem' }}>
           <Typography variant="caption" sx={{ fontWeight: 'bold' }}>Пример структуры файла:</Typography>

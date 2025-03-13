@@ -19,52 +19,11 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
     logger.info(f"Получение содержимого файла поставщика: {supplier_file.stored_filename}")
     supplier_content = get_file_content(supplier_file.stored_filename)
     
-    # Если файл не найден, проверяем, не является ли он мок-файлом
-    if not supplier_content and "mock_" in supplier_file.stored_filename:
-        logger.warning(f"Не удалось получить мок-файл поставщика: {supplier_file.stored_filename}. Попытка создания нового файла.")
-        try:
-            # Создаем базовый пример файла
-            sample_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-            # Сохраняем файл в Supabase
-            save_file(supplier_file.stored_filename, sample_content)
-            # Повторно пытаемся получить содержимое
-            supplier_content = get_file_content(supplier_file.stored_filename)
-            logger.info(f"Создан и получен мок-файл поставщика: {supplier_file.stored_filename}")
-        except Exception as e:
-            logger.error(f"Не удалось создать мок-файл поставщика: {str(e)}")
-    
     logger.info(f"Получение содержимого файла магазина: {store_file.stored_filename}")
     store_content = get_file_content(store_file.stored_filename)
     
-    # Если файл не найден, проверяем, не является ли он мок-файлом
-    if not store_content and "mock_" in store_file.stored_filename:
-        logger.warning(f"Не удалось получить мок-файл магазина: {store_file.stored_filename}. Попытка создания нового файла.")
-        try:
-            # Создаем базовый пример файла
-            sample_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
-            # Сохраняем файл в Supabase
-            save_file(store_file.stored_filename, sample_content)
-            # Повторно пытаемся получить содержимое
-            store_content = get_file_content(store_file.stored_filename)
-            logger.info(f"Создан и получен мок-файл магазина: {store_file.stored_filename}")
-        except Exception as e:
-            logger.error(f"Не удалось создать мок-файл магазина: {str(e)}")
-    
-    if not supplier_content:
-        error_msg = f"ОШИБКА: Не удалось получить содержимое файла поставщика: {supplier_file.stored_filename}"
-        logger.error(error_msg)
-        logger.error(f"Оригинальное имя файла: {supplier_file.original_filename}")
-        logger.error(f"URL файла: {supplier_file.file_url}")
-        logger.error(f"Проверьте существование файла в Supabase и политики доступа")
-        raise ValueError(f"Не удалось получить содержимое файла поставщика: {supplier_file.original_filename}")
-        
-    if not store_content:
-        error_msg = f"ОШИБКА: Не удалось получить содержимое файла магазина: {store_file.stored_filename}"
-        logger.error(error_msg)
-        logger.error(f"Оригинальное имя файла: {store_file.original_filename}")
-        logger.error(f"URL файла: {store_file.file_url}")
-        logger.error(f"Проверьте существование файла в Supabase и политики доступа")
-        raise ValueError(f"Не удалось получить содержимое файла магазина: {store_file.original_filename}")
+    if not supplier_content or not store_content:
+        raise ValueError("Не удалось получить содержимое файлов")
     
     logger.info(f"Оба файла успешно загружены: {supplier_file.stored_filename} ({len(supplier_content)} байт) и {store_file.stored_filename} ({len(store_content)} байт)")
     
@@ -253,11 +212,38 @@ def compare_files(supplier_file: FileInfo, store_file: FileInfo) -> ComparisonRe
     logger.info("Сортировка результатов по разнице в процентах")
     matches.sort(key=lambda x: abs(x["price_diff_percent"]), reverse=True)
     
-    # Создание результата
+    # Преобразуем словари в объекты MatchedItem для matches_data
+    matches_data = []
+    for item in matches:
+        matches_data.append({
+            "article": item["article"],
+            "supplier_price": item["supplier_price"],
+            "store_price": item["store_price"],
+            "price_diff": item["price_diff"],
+            "price_diff_percent": item["price_diff_percent"],
+            "supplier_name": item.get("supplier_name"),
+            "store_name": item.get("store_name")
+        })
+    
+    # Рассчитываем общие метрики для фронтенда
+    total_items = len(matches) + len(missing_in_store) + len(missing_in_supplier)
+    
+    # Создание результата с дополнительными полями для фронтенда
     result = ComparisonResult(
         matches=matches,
         missing_in_store=missing_in_store,
-        missing_in_supplier=missing_in_supplier
+        missing_in_supplier=missing_in_supplier,
+        # Дополнительные поля для совместимости с фронтендом
+        matches_data=matches_data,
+        total_items=total_items,
+        items_only_in_file1=len(missing_in_store),
+        items_only_in_file2=len(missing_in_supplier),
+        mismatches=0,  # Этот параметр нужно рассчитать отдельно при необходимости
+        preview_data=[],  # Можно добавить превью данных при необходимости
+        column_mapping={
+            "identifier": "article",
+            "value": "price"
+        }
     )
     
     logger.info(f"Сравнение завершено успешно. Найдено: совпадений - {len(matches)}, товаров без аналогов в магазине - {len(missing_in_store)}, товаров без аналогов у поставщика - {len(missing_in_supplier)}")

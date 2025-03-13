@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Typography, 
   Box, 
@@ -21,7 +21,11 @@ import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
 import { useNavigate } from 'react-router-dom';
 import FileDropzone from '../components/file/FileDropzone';
 import ColumnSelector from '../components/file/ColumnSelector';
-import { FileInfo, FileType, ColumnMapping } from '../types';
+import { 
+  FileInfo, 
+  FileTypes,
+  ColumnMapping 
+} from '../types';
 import { fileService } from '../services/api';
 
 // Шаги загрузки файлов
@@ -55,7 +59,7 @@ const FileUploadPage: React.FC = () => {
   const [columnsLoading, setColumnsLoading] = useState(false);
   
   // Загрузка колонок для файлов
-  const loadColumns = async () => {
+  const loadColumns = useCallback(async () => {
     setColumnsLoading(true);
     setError(null);
     
@@ -63,6 +67,12 @@ const FileUploadPage: React.FC = () => {
       // Загрузка колонок для файла поставщика
       if (supplierFile && !supplierColumns.length) {
         try {
+          if (!supplierFile.stored_filename) {
+            console.error('Отсутствует stored_filename для файла поставщика');
+            setError('Ошибка загрузки колонок: отсутствует имя файла');
+            return;
+          }
+          
           const columns = await fileService.getColumns(
             supplierFile.stored_filename,
             supplierFile.encoding,
@@ -78,6 +88,12 @@ const FileUploadPage: React.FC = () => {
       // Загрузка колонок для файла магазина
       if (storeFile && !storeColumns.length) {
         try {
+          if (!storeFile.stored_filename) {
+            console.error('Отсутствует stored_filename для файла магазина');
+            setError('Ошибка загрузки колонок: отсутствует имя файла');
+            return;
+          }
+          
           const columns = await fileService.getColumns(
             storeFile.stored_filename,
             storeFile.encoding,
@@ -92,12 +108,12 @@ const FileUploadPage: React.FC = () => {
     } finally {
       setColumnsLoading(false);
     }
-  };
+  }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length]);
   
   // При изменении файлов загружаем их колонки
   useEffect(() => {
     loadColumns();
-  }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length]);
+  }, [supplierFile, storeFile, supplierColumns.length, storeColumns.length, loadColumns]);
   
   // Обработчик загрузки файла поставщика
   const handleSupplierFileUpload = (fileInfo: FileInfo) => {
@@ -118,9 +134,14 @@ const FileUploadPage: React.FC = () => {
       setSupplierFile(updatedFile);
       setSuccess('Колонки для файла поставщика настроены');
       
+      // Выводим отладочную информацию
+      console.log('Сохраняем маппинг колонок для поставщика:', updatedFile);
+      
       fileService.saveColumnMapping(updatedFile)
-        .then(() => {
-          console.log('Маппинг колонок для поставщика успешно сохранен на сервере');
+        .then(response => {
+          console.log('Маппинг колонок для поставщика успешно сохранен на сервере:', response);
+          // Обновляем состояние с данными с сервера
+          setSupplierFile(response);
         })
         .catch(err => {
           console.error('Ошибка при сохранении маппинга колонок поставщика:', err);
@@ -138,9 +159,14 @@ const FileUploadPage: React.FC = () => {
       setStoreFile(updatedFile);
       setSuccess('Колонки для файла магазина настроены');
       
+      // Выводим отладочную информацию
+      console.log('Сохраняем маппинг колонок для магазина:', updatedFile);
+      
       fileService.saveColumnMapping(updatedFile)
-        .then(() => {
-          console.log('Маппинг колонок для магазина успешно сохранен на сервере');
+        .then(response => {
+          console.log('Маппинг колонок для магазина успешно сохранен на сервере:', response);
+          // Обновляем состояние с данными с сервера
+          setStoreFile(response);
         })
         .catch(err => {
           console.error('Ошибка при сохранении маппинга колонок магазина:', err);
@@ -196,7 +222,7 @@ const FileUploadPage: React.FC = () => {
           <Grid container spacing={4}>
             <Grid item xs={12} md={6}>
               <FileDropzone 
-                fileType={FileType.SUPPLIER}
+                fileType={FileTypes.SUPPLIER}
                 title="Загрузите файл с ОПТОВЫМИ ценами"
                 description="Файл прайс-листа от вашего поставщика"
                 onFileUploaded={handleSupplierFileUpload}
@@ -206,7 +232,7 @@ const FileUploadPage: React.FC = () => {
             
             <Grid item xs={12} md={6}>
               <FileDropzone 
-                fileType={FileType.STORE}
+                fileType={FileTypes.STORE}
                 title="Загрузите файл с ТЕКУЩИМИ ценами магазина"
                 description="Ваш текущий прайс-лист, цены в котором нужно обновить"
                 onFileUploaded={handleStoreFileUpload}

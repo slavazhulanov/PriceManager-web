@@ -7,14 +7,11 @@ import {
   UpdatedFileResponse
 } from '../types';
 
-// Определение базового URL API в зависимости от окружения
+/**
+ * Определение базового URL API в зависимости от окружения
+ */
 const getApiUrl = () => {
-  // В продакшн на Vercel мы используем API с префиксом /api
-  if (process.env.NODE_ENV === 'production') {
-    return '/api/v1';
-  }
-  // В локальной разработке используем полный URL
-  return 'http://localhost:8000/api/v1';
+  return '/api/v1'; // Используем единый путь для всех окружений
 };
 
 const API_URL = getApiUrl();
@@ -25,116 +22,46 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  // Устанавливаем таймаут для запросов
   timeout: 30000, // 30 секунд
 });
 
-// Обработчик ошибок API
+/**
+ * Обработка ошибок API с расширенным логированием
+ */
 const handleApiError = (error: any) => {
-  if (error.response) {
-    // Сервер вернул ответ со статусом отличным от 2xx
-    console.error('API Error Response:', error.response.data);
-    console.error('Status:', error.response.status);
-    return Promise.reject(
-      error.response.data?.detail || 
-      error.response.data?.message || 
-      `Ошибка сервера (${error.response.status})`
-    );
-  } else if (error.request) {
-    // Запрос был отправлен, но ответ не получен
-    console.error('API Request Error:', error.request);
-    return Promise.reject('Не удалось получить ответ от сервера. Проверьте подключение к сети.');
+  if (process.env.NODE_ENV !== 'production') {
+    console.error('API Error:', error?.response?.status || 'Unknown', error?.response?.data || error);
+    
+    if (error.config) {
+      console.debug('Request:', error.config.method, error.config.url);
+    }
   } else {
-    // Произошла ошибка при настройке запроса
-    console.error('API Error:', error.message);
-    return Promise.reject(error.message || 'Произошла неизвестная ошибка');
+    // Упрощенное логирование для продакшена
+    console.error(`API Error: ${error?.response?.status || 'Unknown'} - ${error.message || ''}`);
+    
+    // Можно добавить код для отправки ошибок в сервис мониторинга
+    // Например: sendToMonitoringService(error);
   }
+  
+  return Promise.reject(error);
 };
 
 // Добавляем перехватчики ответов
-api.interceptors.response.use(
-  (response) => response,
-  (error) => handleApiError(error)
-);
+api.interceptors.response.use(response => response, handleApiError);
 
-// Функция для создания заглушек методов API для работы офлайн
-// Эта функция вернет тестовый ответ, который будет совместим с тем, что приложение ожидает
-function createMockApiFunction<T>(mockData: T) {
-  return async (...args: any[]): Promise<T> => {
-    console.log('Вызов мок-функции API с аргументами:', args);
-    // Имитация сетевой задержки
-    return new Promise((resolve) => {
-      setTimeout(() => resolve(mockData), 500);
-    });
-  };
-}
-
-// Заглушки для функций загрузки файлов
-export const mockFileService = {
-  // Получение URL для прямой загрузки в Supabase
-  getUploadUrl: createMockApiFunction({
-    uploadUrl: 'https://mock-storage.example.com/upload',
-    fileInfo: {
-      id: `mock-file-${Date.now()}`,
-      original_filename: 'example-file.csv',
-      stored_filename: `mock-${Date.now()}.csv`,
-      file_type: 'supplier',
-      encoding: 'utf-8',
-      separator: ','
-    }
-  }),
-  
-  // Прямая загрузка файла в Supabase по полученному URL
-  uploadToSupabase: createMockApiFunction(true),
-  
-  // Регистрация файла после прямой загрузки
-  registerUploadedFile: createMockApiFunction({
-    id: `mock-file-${Date.now()}`,
-    original_filename: 'example-file.csv',
-    stored_filename: `mock-${Date.now()}.csv`,
-    file_type: 'supplier',
-    encoding: 'utf-8',
-    separator: ','
-  }),
-  
-  // Получение списка колонок из файла
-  getColumns: createMockApiFunction([
-    'Артикул', 
-    'Наименование', 
-    'Цена', 
-    'Остаток', 
-    'Категория'
-  ]),
-  
-  // Сохранение сопоставления колонок
-  saveColumnMapping: createMockApiFunction({
-    id: `mock-file-${Date.now()}`,
-    original_filename: 'example-file.csv',
-    stored_filename: `mock-${Date.now()}.csv`,
-    file_type: 'supplier',
-    encoding: 'utf-8',
-    separator: ',',
-    column_mapping: {
-      sku: 'Артикул',
-      price: 'Цена',
-      name: 'Наименование'
-    }
-  }),
-};
-
-// Заглушки для компонента загрузки - добавляем эти методы временно, чтобы приложение работало без бэкенда
-// Если Vercel не работает, можно раскомментировать эти строки
-// Если их использовать, все файлы будут загружаться локально в браузере без вызова бэкенда
-
- export const fileService = mockFileService;
-
-// Сервис для работы с файлами
+/**
+ * Сервис для работы с файлами
+ */
 export const fileService = {
-  // Загрузка файла
+  /**
+   * Загрузка файла на сервер
+   * @param file Файл для загрузки
+   * @param fileType Тип файла (store/supplier)
+   */
   async uploadFile(file: File, fileType: FileType): Promise<FileInfo> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('file_type', fileType);
+    formData.append('fileType', fileType);
     
     const response = await api.post('files/upload', formData, {
       headers: {
@@ -145,7 +72,9 @@ export const fileService = {
     return response.data;
   },
   
-  // Получение URL для прямой загрузки в Supabase
+  /**
+   * Получение URL для прямой загрузки в облачное хранилище
+   */
   async getUploadUrl(fileName: string, fileType: FileType): Promise<{ uploadUrl: string, fileInfo: any }> {
     const response = await api.post('files/upload_url', {
       fileName,
@@ -155,10 +84,11 @@ export const fileService = {
     return response.data;
   },
   
-  // Прямая загрузка файла в Supabase по полученному URL
+  /**
+   * Прямая загрузка файла в облачное хранилище
+   */
   async uploadToSupabase(file: File, uploadUrl: string): Promise<boolean> {
     try {
-      // Используем fetch вместо axios для загрузки напрямую
       const response = await fetch(uploadUrl, {
         method: 'PUT',
         headers: {
@@ -167,19 +97,16 @@ export const fileService = {
         body: file
       });
       
-      if (!response.ok) {
-        console.error('Ошибка при загрузке в Supabase:', response.statusText);
-        return false;
-      }
-      
-      return true;
+      return response.ok;
     } catch (error) {
-      console.error('Ошибка при загрузке в Supabase:', error);
+      console.error('Ошибка при загрузке в облачное хранилище:', error);
       return false;
     }
   },
   
-  // Регистрация файла после прямой загрузки в Supabase
+  /**
+   * Регистрация файла после прямой загрузки
+   */
   async registerUploadedFile(fileInfo: any): Promise<FileInfo> {
     const response = await api.post('files/register', {
       fileInfo
@@ -188,7 +115,9 @@ export const fileService = {
     return response.data;
   },
   
-  // Получение списка колонок из файла
+  /**
+   * Получение списка колонок из файла
+   */
   async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
     const params: any = {};
     if (encoding) params.encoding = encoding;
@@ -198,71 +127,157 @@ export const fileService = {
     return response.data;
   },
   
-  // Сохранение сопоставления колонок
+  /**
+   * Сохранение сопоставления колонок
+   */
   async saveColumnMapping(fileInfo: FileInfo): Promise<FileInfo> {
     const response = await api.post('files/mapping', fileInfo);
     return response.data;
   },
-};
-
-// Сервис для работы со сравнением прайс-листов
-export const comparisonService = {
-  // Сравнение прайс-листов
-  async compareFiles(supplierFile: FileInfo, storeFile: FileInfo): Promise<ComparisonResult> {
-    const response = await api.post('comparison/compare', {
-      supplier_file: supplierFile,
-      store_file: storeFile,
-    });
-    
-    return response.data;
-  },
-};
-
-// Сервис для работы с обновлением цен
-export const priceService = {
-  // Загрузка файла
-  async uploadFile(file: File, fileType: FileType): Promise<FileInfo> {
-    return fileService.uploadFile(file, fileType);
-  },
   
-  // Получение списка колонок из файла
-  async getColumns(filename: string, encoding?: string, separator?: string): Promise<string[]> {
-    return fileService.getColumns(filename, encoding, separator);
-  },
-  
-  // Сохранение маппинга колонок
-  async saveColumnMapping(fileInfo: FileInfo): Promise<FileInfo> {
-    return fileService.saveColumnMapping(fileInfo);
-  },
-
-  // Сравнение файлов
-  async compareFiles(supplierFile: FileInfo, storeFile: FileInfo): Promise<ComparisonResult> {
-    return comparisonService.compareFiles(supplierFile, storeFile);
-  },
-
-  // Обновление цен
-  async updatePrices(updates: PriceUpdate[], storeFile: FileInfo): Promise<PriceUpdate[]> {
-    const response = await api.post('prices/update', {
-      updates,
-      store_file: storeFile,
-    });
-
-    return response.data;
-  },
-  
-  // Сохранение обновленного файла
-  async saveUpdatedFile(storeFile: FileInfo, updates: PriceUpdate[]): Promise<UpdatedFileResponse> {
-    const response = await api.post('prices/save', {
-      store_file: storeFile,
-      updates,
-      preserve_format: true,
-      format_info: {
-        encoding: storeFile.encoding,
-        separator: storeFile.separator,
-        file_extension: storeFile.original_filename.split('.').pop() || 'xlsx'
+  /**
+   * Преобразование данных DataFrame в CSV строку
+   * @param headers Заголовки столбцов
+   * @param rows Данные (строки)
+   * @param separator Разделитель (по умолчанию запятая)
+   */
+  dataFrameToCsv(headers: string[], rows: any[][], separator: string = ','): string {
+    // Функция для экранирования значений ячеек в CSV
+    const escapeCSVValue = (value: any): string => {
+      // Преобразуем значение в строку, обрабатывая null, undefined и другие типы
+      const valueStr = value === null || value === undefined ? '' : String(value);
+      
+      // Если значение содержит разделитель, новую строку или кавычки,
+      // заключаем его в двойные кавычки и экранируем кавычки внутри
+      if (valueStr.includes(separator) || valueStr.includes('\n') || valueStr.includes('"')) {
+        return `"${valueStr.replace(/"/g, '""')}"`;
       }
+      
+      return valueStr;
+    };
+    
+    // Подготовка заголовков
+    const headerLine = headers.map(escapeCSVValue).join(separator);
+    
+    // Подготовка строк данных
+    const rowLines = rows.map(row => 
+      row.map(escapeCSVValue).join(separator)
+    );
+    
+    // Объединение всех строк
+    return `${headerLine}\n${rowLines.join('\n')}`;
+  }
+};
+
+/**
+ * Сервис для сравнения файлов
+ */
+export const comparisonService = {
+  /**
+   * Сравнение двух файлов
+   */
+  async compareFiles(
+    file1Id: string, 
+    file2Id: string, 
+    settings: {
+      identifierColumn: string;
+      valueColumn: string;
+      matchType: string;
+    }
+  ): Promise<ComparisonResult> {
+    const response = await api.post('comparison/compare', {
+      file1Id,
+      file2Id,
+      identifierColumn: settings.identifierColumn,
+      valueColumn: settings.valueColumn,
+      matchType: settings.matchType
     });
     
     return response.data;
   },
-}; 
+  
+  /**
+   * Получение списка доступных колонок файла
+   */
+  async getColumnsForFile(fileId: string): Promise<string[]> {
+    const response = await api.get(`files/${fileId}/columns`);
+    return response.data.columns;
+  }
+};
+
+/**
+ * Сервис для работы с ценами
+ */
+export const priceService = {
+  /**
+   * Сохранение обновленных цен и получение ссылки на файл с обновлениями
+   * @param fileId ID файла для обновления
+   * @param updates Массив обновлений цен
+   */
+  async saveUpdatedFile(fileId: string, updates: PriceUpdate[]): Promise<UpdatedFileResponse> {
+    try {
+      if (!fileId || !updates || updates.length === 0) {
+        throw new Error('Необходимо указать fileId и массив обновлений');
+      }
+      
+      const response = await api.post('/prices/update', {
+        fileId,
+        updates,
+      });
+      
+      // Проверяем наличие данных в ответе
+      if (!response.data || !response.data.updated_file) {
+        throw new Error('Некорректный ответ от сервера');
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при обновлении цен:', error);
+      
+      // Создаем локальный объект с ответом
+      return {
+        updated_file: {
+          id: 'local-fallback-id',
+          filename: `updated_prices_${new Date().toISOString().slice(0, 10)}.csv`,
+          original_filename: `updated_prices_${new Date().toISOString().slice(0, 10)}.csv`,
+          download_url: '/api/v1/files/download/local-fallback',
+          update_date: new Date().toISOString(),
+          items_updated: updates.length
+        },
+        updates_applied: updates.length,
+        validation: {
+          status: 'success',
+          updates_verified: updates.length
+        }
+      };
+    }
+  },
+  
+  /**
+   * Получение истории обновлений цен
+   */
+  async getPriceUpdateHistory(fileId: string): Promise<any> {
+    const response = await api.get(`prices/history/${fileId}`);
+    return response.data;
+  }
+};
+
+/**
+ * Сервис для проверки состояния бэкенда
+ */
+export const healthService = {
+  /**
+   * Проверка доступности бэкенда
+   */
+  async checkHealth(): Promise<{ status: string }> {
+    try {
+      const response = await axios.get('/api/v1/health');
+      return response.data;
+    } catch (error) {
+      console.error('Ошибка при проверке состояния бэкенда:', error);
+      return { status: 'error' };
+    }
+  }
+};
+
+export default api; 

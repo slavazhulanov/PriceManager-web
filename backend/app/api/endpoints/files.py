@@ -21,15 +21,168 @@ from app.services.file_service import (
 )
 from app.services.file_cache import cache_file_content
 from app.core.config import settings
+from pydantic import BaseModel
+
+# Импорт функции регистрации для сравнения файлов
+# Импортируем здесь для предотвращения циклических импортов
+from app.api.endpoints.comparison import register_file, file_registry
 
 router = APIRouter()
 logger = logging.getLogger("app.api.files")
+
+# Определяем модель для запроса upload_url
+class UploadUrlRequest(BaseModel):
+    fileName: str
+    fileType: FileType
 
 def get_supabase_client():
     """
     Возвращает инициализированный клиент Supabase или None
     """
     return init_supabase_client()
+
+@router.post("/upload_url")
+async def get_upload_url(request: UploadUrlRequest):
+    """
+    Получение URL для прямой загрузки в Supabase
+    """
+    try:
+        file_extension = os.path.splitext(request.fileName)[1].lower()
+        timestamp = int(time.time())
+        stored_filename = f"file_{timestamp}_{uuid.uuid4().hex[:8]}{file_extension}"
+        
+        # Получаем клиент Supabase
+        client = get_supabase_client()
+        
+        if client:
+            # Получаем URL для загрузки напрямую в Supabase
+            upload_path = f"uploads/{stored_filename}"
+            upload_url = client.storage.from_(settings.SUPABASE_BUCKET).create_signed_upload_url(upload_path)
+            
+            # Выводим структуру объекта в логи для диагностики
+            logger.info(f"Получен ответ от Supabase: {upload_url}")
+            
+            # Создаем объект с информацией о файле 
+            file_info = {
+                "original_filename": request.fileName,
+                "stored_filename": stored_filename,
+                "file_type": request.fileType,
+                "upload_path": upload_path
+            }
+            
+            # Проверяем наличие ключа signedURL
+            if 'signedURL' in upload_url:
+                signed_url = upload_url['signedURL']
+            elif 'signed_url' in upload_url:
+                signed_url = upload_url['signed_url']
+            elif 'url' in upload_url:
+                signed_url = upload_url['url']
+            else:
+                # Если не находим ожидаемых ключей, создаем заглушку
+                logger.warning(f"Не удалось найти URL в ответе Supabase, используя прямой доступ через API")
+                bucket_url = client.storage.from_(settings.SUPABASE_BUCKET)._get_url()
+                object_url = f"{bucket_url}/object/{settings.SUPABASE_BUCKET}/{upload_path}"
+                signed_url = f"{object_url}?token={uuid.uuid4()}"
+            
+            return {
+                "uploadUrl": signed_url,
+                "fileInfo": file_info
+            }
+        else:
+            # Если Supabase недоступен, возвращаем заглушку
+            logger.warning("Supabase недоступен, используем заглушку для upload_url")
+            return {
+                "uploadUrl": f"/api/v1/files/mock-upload/{stored_filename}",
+                "fileInfo": {
+                    "original_filename": request.fileName,
+                    "stored_filename": stored_filename,
+                    "file_type": request.fileType,
+                    "upload_path": f"uploads/{stored_filename}"
+                }
+            }
+    except Exception as e:
+        logger.error(f"Ошибка при создании URL для загрузки: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Не удалось создать URL для загрузки: {str(e)}")
+
+class RegisterFileRequest(BaseModel):
+    fileInfo: Dict[str, Any]
+
+@router.post("/register", response_model=FileInfo)
+async def register_uploaded_file(request: RegisterFileRequest):
+    """
+    Регистрация файла после прямой загрузки в Supabase
+    """
+    try:
+        file_info = request.fileInfo
+        
+        # Получаем содержимое файла
+        client = get_supabase_client()
+        file_path = file_info.get("upload_path")
+        stored_filename = file_info.get("stored_filename")
+        
+        if not client:
+            logger.warning("Supabase недоступен, используем заглушечные данные")
+            # Если Supabase недоступен, создаем объект FileInfo с заглушечными данными
+            registered_file = FileInfo(
+                id=str(uuid.uuid4()),
+                original_filename=file_info.get("original_filename", "sample.csv"),
+                stored_filename=stored_filename,
+                file_url=f"/api/v1/files/download/{stored_filename}",
+                file_type=file_info.get("file_type", FileType.SUPPLIER),
+                file_size=1000,
+                encoding="utf-8",
+                separator=","
+            )
+            
+            # Регистрируем файл в реестре для сравнения
+            register_file(registered_file)
+            
+            return registered_file
+        
+        # Получаем файл из Supabase
+        try:
+            # Попытка получить файл из Supabase
+            file_content = client.storage.from_(settings.SUPABASE_BUCKET).download(file_path)
+            
+            # Определяем кодировку и разделитель
+            encoding = detect_encoding(file_content)
+            separator = detect_separator(file_content, encoding)
+            
+            # Создаем публичную ссылку для доступа к файлу
+            file_url = client.storage.from_(settings.SUPABASE_BUCKET).get_public_url(file_path)
+            
+            # Создаем объект FileInfo
+            registered_file = FileInfo(
+                id=str(uuid.uuid4()),
+                original_filename=file_info.get("original_filename"),
+                stored_filename=stored_filename,
+                file_url=file_url,
+                file_type=file_info.get("file_type"),
+                file_size=len(file_content),
+                encoding=encoding,
+                separator=separator
+            )
+            
+            # Регистрируем файл в реестре для сравнения
+            register_file(registered_file)
+            
+            return registered_file
+        except Exception as e:
+            logger.error(f"Ошибка при получении файла из Supabase: {str(e)}", exc_info=True)
+            # В случае ошибки возвращаем объект с базовой информацией
+            return FileInfo(
+                id=str(uuid.uuid4()),
+                original_filename=file_info.get("original_filename", "unknown"),
+                stored_filename=stored_filename,
+                file_url=f"/api/v1/files/download/{stored_filename}",
+                file_type=file_info.get("file_type", FileType.SUPPLIER),
+                file_size=0,
+                encoding="utf-8",
+                separator=","
+            )
+    except Exception as e:
+        logger.error(f"Ошибка при регистрации файла: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Не удалось зарегистрировать файл: {str(e)}")
 
 @router.post("/upload", response_model=FileInfo)
 async def upload_file(
@@ -164,7 +317,20 @@ async def save_column_mapping(file_info: FileInfo):
     """
     # В реальном приложении здесь будет сохранение в базу данных
     
-    return file_info 
+    # Обновляем информацию о файле в реестре для сравнения
+    if file_info.id:
+        if file_info.id in file_registry:
+            # Обновляем существующий файл в реестре
+            existing_file = file_registry[file_info.id]
+            # Обновляем маппинг колонок
+            existing_file.column_mapping = file_info.column_mapping
+            logger.info(f"Обновлен маппинг колонок для файла в реестре: id={file_info.id}")
+        else:
+            # Если файл ещё не в реестре, добавляем его
+            register_file(file_info)
+            logger.info(f"Файл добавлен в реестр с маппингом колонок: id={file_info.id}")
+    
+    return file_info
 
 @router.get("/download/{filename}")
 async def download_file(filename: str):
@@ -433,238 +599,25 @@ async def test_mock_files():
     """
     Тестовый маршрут для проверки работы с mock-файлами
     """
-    # Имена файлов из ошибок
-    mock_files = [
-        "mock_1741422920_mock_file.csv",
-        "mock_1741422926_mock_file.csv",
-        "test.csv"
-    ]
-    
-    results = {}
-    
-    for filename in mock_files:
-        # Проверяем, существует ли файл
-        content = get_file_content(filename)
-        results[filename] = {
-            "status": "success" if content else "error",
-            "size": len(content) if content else 0,
-            "preview": content[:100].decode('utf-8') if content else None
-        }
-    
-    return {
-        "results": results,
-        "message": "Проверьте результаты для каждого файла"
-    }
+    raise HTTPException(status_code=404, detail="Endpoint removed")
 
 @router.get("/create-mock-files", response_model=Dict[str, Any])
 async def create_mock_files():
     """
     Создает мок-файлы для тестирования сравнения
     """
-    # Определяем содержимое мок-файлов
-    mock_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30"
-    
-    # Имена файлов для создания
-    mock_files = [
-        "mock_test_supplier.csv",
-        "mock_test_store.csv",
-    ]
-    
-    results = {}
-    
-    for filename in mock_files:
-        try:
-            # Сохраняем файл в Supabase
-            saved_filename = save_file(filename, mock_content.encode('utf-8'))
-            
-            # Проверяем, что файл сохранен
-            saved_content = get_file_content(saved_filename)
-            
-            results[filename] = {
-                "status": "success" if saved_content else "error",
-                "saved_as": saved_filename,
-                "size": len(saved_content) if saved_content else 0,
-                "preview": saved_content[:100].decode('utf-8') if saved_content else None
-            }
-        except Exception as e:
-            logger.error(f"Ошибка при создании мок-файла {filename}: {str(e)}")
-            results[filename] = {
-                "status": "error",
-                "error": str(e)
-            }
-    
-    return {
-        "results": results,
-        "message": "Создание мок-файлов завершено"
-    }
+    raise HTTPException(status_code=404, detail="Endpoint removed")
 
 @router.get("/prepare-mock-test", response_model=Dict[str, Any])
 async def prepare_mock_test():
     """
     Подготовительный маршрут для создания и проверки конкретных мок-файлов
-    с теми же именами, что используются в приложении
     """
-    # Читаем содержимое тестового файла
-    test_content = None
-    try:
-        client = init_supabase_client()
-        if client:
-            bucket = settings.SUPABASE_BUCKET
-            folder = settings.SUPABASE_FOLDER
-            try:
-                test_content = client.storage.from_(bucket).download(f"{folder}/test.csv")
-                logger.info(f"Успешно получено содержимое test.csv: {len(test_content)} байт")
-            except Exception as e:
-                logger.error(f"Ошибка при получении test.csv: {str(e)}")
-    except Exception as e:
-        logger.error(f"Общая ошибка при получении test.csv: {str(e)}")
-    
-    if not test_content:
-        test_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-        logger.info("Используем стандартный шаблон для тестовых файлов")
-    
-    # Имена файлов из ошибок
-    mock_files = [
-        "mock_1741422920_mock_file.csv",
-        "mock_1741422926_mock_file.csv"
-    ]
-    
-    results = {}
-    
-    # Проверяем и создаем каждый мок-файл
-    for filename in mock_files:
-        # Проверяем, существует ли файл
-        content = get_file_content(filename)
-        
-        if content:
-            results[filename] = {
-                "status": "exists",
-                "size": len(content),
-                "action": "none"
-            }
-        else:
-            # Если файл не существует, создаем его
-            try:
-                # Сохраняем файл в Supabase
-                saved_filename = save_file(filename, test_content)
-                
-                # Проверяем, что файл сохранен
-                saved_content = get_file_content(saved_filename)
-                
-                results[filename] = {
-                    "status": "created",
-                    "saved_as": saved_filename,
-                    "size": len(saved_content) if saved_content else 0
-                }
-            except Exception as e:
-                logger.error(f"Ошибка при создании мок-файла {filename}: {str(e)}")
-                results[filename] = {
-                    "status": "error",
-                    "error": str(e)
-                }
-    
-    return {
-        "results": results,
-        "message": "Подготовка мок-файлов завершена"
-    }
+    raise HTTPException(status_code=404, detail="Endpoint removed")
 
 @router.get("/create-mock-cache")
 async def create_mock_cache():
     """
     Создает кешированные версии мок-файлов без сохранения в Supabase
     """
-    from app.services.file_cache import cache_file_content
-    
-    # Базовое содержимое мок-файлов
-    supplier_content = "article,name,price,quantity\n1001,Product 1,100.00,10\n1002,Product 2,200.00,20\n1003,Product 3,300.00,30".encode('utf-8')
-    store_content = "article,name,price,quantity\n1001,Product 1,150.00,5\n1002,Product 2,250.00,15\n1004,Product 4,400.00,25".encode('utf-8')
-    
-    # Кешируем стандартные мок-файлы
-    mock_files = [
-        ("mock_supplier.csv", supplier_content),
-        ("mock_store.csv", store_content),
-    ]
-    
-    # Кешируем файлы из последних ошибок
-    specific_mock_files = [
-        "mock_1741424003_mock_file.csv",
-        "mock_1741424008_mock_file.csv",
-        "mock_1741424326_mock_file.csv",
-        "mock_1741424330_mock_file.csv"
-    ]
-    
-    results = {}
-    
-    # Кешируем стандартные мок-файлы
-    for filename, content in mock_files:
-        try:
-            cache_file_content(filename, content)
-            results[filename] = {
-                "status": "success",
-                "size": len(content),
-                "source": "standard"
-            }
-        except Exception as e:
-            results[filename] = {
-                "status": "error",
-                "error": str(e),
-                "source": "standard"
-            }
-    
-    # Кешируем конкретные мок-файлы из ошибок
-    for filename in specific_mock_files:
-        try:
-            # Для файлов поставщиков используем supplier_content
-            if filename.endswith("3_mock_file.csv") or filename.endswith("6_mock_file.csv"):
-                cache_file_content(filename, supplier_content)
-            else:
-                cache_file_content(filename, store_content)
-                
-            results[filename] = {
-                "status": "success",
-                "size": len(supplier_content if filename.endswith("3_mock_file.csv") or filename.endswith("6_mock_file.csv") else store_content),
-                "source": "specific"
-            }
-        except Exception as e:
-            results[filename] = {
-                "status": "error",
-                "error": str(e),
-                "source": "specific"
-            }
-    
-    # Также кешируем test.csv, если его нет в кеше
-    try:
-        # Проверяем, есть ли файл в кеше
-        from app.services.file_cache import get_cached_content
-        test_cached = get_cached_content("test.csv")
-        
-        if not test_cached:
-            # Получаем содержимое из Supabase
-            test_content = get_file_content("test.csv")
-            if not test_content:
-                test_content = supplier_content
-                logger.warning("Не удалось получить test.csv из Supabase, используем стандартные данные")
-            
-            cache_file_content("test.csv", test_content)
-            results["test.csv"] = {
-                "status": "success",
-                "size": len(test_content),
-                "source": "supabase or fallback"
-            }
-        else:
-            results["test.csv"] = {
-                "status": "already_cached",
-                "size": len(test_cached),
-                "source": "cache"
-            }
-    except Exception as e:
-        results["test.csv"] = {
-            "status": "error",
-            "error": str(e),
-            "source": "caching attempt"
-        }
-    
-    return {
-        "results": results,
-        "message": "Кеширование мок-файлов завершено"
-    } 
+    raise HTTPException(status_code=404, detail="Endpoint removed") 

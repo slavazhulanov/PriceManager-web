@@ -19,12 +19,17 @@
   ],
   "routes": [
     {
+      "src": "/api/health",
+      "dest": "backend/index.py"
+    },
+    {
       "src": "/api(.*)",
       "dest": "backend/index.py"
     },
     {
-      "src": "/(.*)",
-      "dest": "frontend/$1"
+      "src": "/((?!api).*)",
+      "dest": "frontend/index.html",
+      "status": 200
     }
   ]
 } 

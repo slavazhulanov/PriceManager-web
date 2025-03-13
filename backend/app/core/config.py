@@ -1,6 +1,5 @@
 import os
 import json
-import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from pydantic_settings import BaseSettings
@@ -8,9 +7,6 @@ from pydantic import validator
 
 # Определение базового каталога проекта
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Инициализация логгера
-logger = logging.getLogger("app.core.config")
 
 class Settings(BaseSettings):
     # Базовые настройки приложения
@@ -20,21 +16,23 @@ class Settings(BaseSettings):
     
     # Настройки сервера
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = int(os.getenv("PORT", "8000"))
     DEBUG: bool = False  # По умолчанию выключен отладочный режим
     
     # Настройки CORS
-    CORS_ORIGINS: List[str] = []
+    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
     
     # Настройки Supabase
-    SUPABASE_URL: str
-    SUPABASE_KEY: str
-    SUPABASE_BUCKET: str = "price-files"
-    SUPABASE_FOLDER: str = "uploads"
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    SUPABASE_SERVICE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
+    SUPABASE_BUCKET: str = os.getenv("SUPABASE_BUCKET", "price-manager")
+    SUPABASE_FOLDER: str = os.getenv("SUPABASE_FOLDER", "files")
     
     # Настройки логирования
     LOG_LEVEL: str = "INFO"  # Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    LOG_DIR: str = "logs"
     
     # Настройки планировщика
     CLEANUP_INTERVAL: int = 86400  # Интервал очистки кеша в секундах (по умолчанию 1 день)
@@ -62,7 +60,7 @@ class Settings(BaseSettings):
     
     # Настройки хранилища
     # В Vercel всегда USE_CLOUD_STORAGE=true для работы с Supabase
-    IS_VERCEL: bool = os.environ.get("VERCEL") == "1"
+    IS_VERCEL: str = os.getenv("VERCEL", "0")
     # Всегда используем Supabase Storage
     USE_CLOUD_STORAGE: bool = True
     
@@ -70,71 +68,6 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
-    
-    def get_logging_config(self) -> Dict[str, Any]:
-        """
-        Возвращает конфигурацию логирования на основе текущих настроек
-        """
-        return {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "format": self.LOG_FORMAT,
-                },
-                "json": {
-                    "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-                    "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
-                    "timestamp": True
-                }
-            },
-            "handlers": {
-                "console": {
-                    "class": "logging.StreamHandler",
-                    "formatter": "default" if not self.DEBUG else "json",
-                    "level": self.LOG_LEVEL,
-                },
-                "file": {
-                    "class": "logging.handlers.RotatingFileHandler",
-                    "formatter": "json",
-                    "filename": "logs/app.log",
-                    "maxBytes": 10485760,  # 10MB
-                    "backupCount": 3,
-                    "level": self.LOG_LEVEL,
-                },
-            },
-            "loggers": {
-                "app": {
-                    "handlers": ["console", "file"],
-                    "level": self.LOG_LEVEL,
-                    "propagate": False,
-                },
-                "app.services": {
-                    "handlers": ["console", "file"],
-                    "level": self.LOG_LEVEL,
-                    "propagate": False,
-                },
-                "app.api": {
-                    "handlers": ["console", "file"],
-                    "level": self.LOG_LEVEL,
-                    "propagate": False,
-                },
-                "uvicorn": {
-                    "handlers": ["console"],
-                    "level": self.LOG_LEVEL,
-                    "propagate": False,
-                },
-                "fastapi": {
-                    "handlers": ["console"],
-                    "level": self.LOG_LEVEL,
-                    "propagate": False,
-                }
-            },
-            "root": {
-                "handlers": ["console"],
-                "level": self.LOG_LEVEL,
-            }
-        }
     
     def parse_cors_origins(self) -> List[str]:
         """
@@ -163,24 +96,24 @@ class Settings(BaseSettings):
         if not v and os.environ.get("VERCEL") == "1":
             raise ValueError("SECRET_KEY должен быть установлен в продакшн окружении")
         if len(v) < 32:
-            logger.warning("SECRET_KEY слишком короткий для продакшн! Рекомендуется использовать ключ длиной не менее 32 символов")
+            print("WARNING: SECRET_KEY слишком короткий для продакшн! Рекомендуется использовать ключ длиной не менее 32 символов")
         return v
 
+    # Валидатор для CORS_ORIGINS
+    @validator("CORS_ORIGINS", pre=True)
+    def assemble_cors_origins(cls, v):
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+
 settings = Settings()
-
-# Логируем информацию о конфигурации
-logger.info(f"Начальная инициализация конфигурации")
-logger.info(f"Окружение: {'Vercel (продакшен)' if settings.IS_VERCEL else 'Локальное'}")
-logger.info(f"Использование Supabase Storage: Да")
-
-# Для работы с Supabase нужны URL и ключ
-if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
-    logger.warning(f"Не указаны SUPABASE_URL или SUPABASE_KEY!")
-    logger.warning(f"Операции с файлами в Supabase будут недоступны")
-else:
-    logger.info(f"Настройки Supabase: URL={settings.SUPABASE_URL}, Bucket={settings.SUPABASE_BUCKET}, Folder={settings.SUPABASE_FOLDER}")
 
 # Создаем директорию для демо данных
 demo_data_dir = os.path.join(settings.BASE_DIR, 'demo_data')
 os.makedirs(demo_data_dir, exist_ok=True)
-logger.info(f"Создана директория для демо данных: {demo_data_dir}") 
+
+# Для отладки
+if settings.DEBUG:
+    print(f"Настройки приложения: {settings.dict()}") 

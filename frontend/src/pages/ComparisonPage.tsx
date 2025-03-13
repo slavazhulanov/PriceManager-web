@@ -7,7 +7,6 @@ import {
   Tabs, 
   Tab, 
   Alert,
-  Button,
   CircularProgress,
   Chip,
   Card,
@@ -28,11 +27,11 @@ import {
   MissingInStoreItem, 
   MissingInSupplierItem 
 } from '../types';
-import { comparisonService } from '../services/api';
 import InfoIcon from '@mui/icons-material/Info';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import useLogger from '../hooks/useLogger';
 import LogButton from '../components/ui/LogButton';
+import axios from 'axios';
 
 interface LocationState {
   supplierFile: FileInfo;
@@ -85,12 +84,21 @@ const ComparisonPage: React.FC = () => {
   const getStatistics = () => {
     if (!comparisonResult) return null;
     
+    // Проверяем наличие данных
+    if (!comparisonResult.matches_data || comparisonResult.matches_data.length === 0) {
+      return {
+        higherPrices: [],
+        lowerPrices: [],
+        samePrices: []
+      };
+    }
+    
     // Цены выше в магазине
-    const higherPrices = comparisonResult.matches.filter(item => item.price_diff < 0);
+    const higherPrices = comparisonResult.matches_data.filter(item => item.price_diff < 0);
     // Цены ниже в магазине
-    const lowerPrices = comparisonResult.matches.filter(item => item.price_diff > 0);
+    const lowerPrices = comparisonResult.matches_data.filter(item => item.price_diff > 0);
     // Одинаковые цены
-    const samePrices = comparisonResult.matches.filter(item => item.price_diff === 0);
+    const samePrices = comparisonResult.matches_data.filter(item => item.price_diff === 0);
     
     return {
       higherPrices,
@@ -224,135 +232,120 @@ const ComparisonPage: React.FC = () => {
     }
   ];
   
-  // Загрузка результатов сравнения при монтировании
-  useEffect(() => {
-    const compareFiles = async () => {
+  // Проверка доступности бэкенда
+  const checkBackendAvailability = async () => {
+    const endpoints = ['/api/v1/health', '/docs', '/api/v1'];
+    let backendAvailable = false;
+    
+    // Пробуем подключиться к разным эндпоинтам бэкенда
+    for (const endpoint of endpoints) {
+      try {
+        console.log(`Пробуем подключиться к ${endpoint}...`);
+        await axios.get(`${endpoint}`, { timeout: 1500 });
+        console.log(`Успешное подключение к ${endpoint}`);
+        backendAvailable = true;
+        break;
+      } catch (e) {
+        console.log(`Не удалось подключиться к ${endpoint}:`, e);
+      }
+    }
+    
+    if (!backendAvailable) {
+      throw new Error('Не удалось подключиться к серверу. Проверьте, запущен ли бэкенд на порту 8000.');
+    }
+  };
+
+  // Функция сравнения файлов
+  const compareFiles = async () => {
+    setLoading(true);
+    setError('');
+    setComparisonResult(null);
+
+    try {
+      // Проверяем доступность бэкенда
+      await checkBackendAvailability();
+      
       if (!state?.supplierFile || !state?.storeFile) {
-        setError('Не найдены файлы для сравнения. Пожалуйста, вернитесь на страницу загрузки файлов.');
-        logger.logUserAction('error', 'comparison', { error: 'missing_files' });
-        return;
+        throw new Error('Не найдены файлы для сравнения. Пожалуйста, вернитесь на страницу загрузки файлов.');
       }
       
-      try {
-        setLoading(true);
-        setError(null);
-        
-        logger.logUserAction('comparison_start', 'comparison', {
-          supplier_file: state.supplierFile.original_filename,
-          store_file: state.storeFile.original_filename
-        });
-        
-        console.log('Отправляемые данные:', {
-          supplier_file: state.supplierFile,
-          store_file: state.storeFile,
-        });
+      // Отправка запроса на сервер с данными из location state
+      const apiUrl = `/api/v1/comparison/compare`;
+      console.log('Отправка запроса на:', apiUrl);
+      console.log('С данными:', {
+        supplier_file: state.supplierFile,
+        store_file: state.storeFile
+      });
+      
+      const response = await axios.post(apiUrl, {
+        supplier_file: state.supplierFile,
+        store_file: state.storeFile
+      });
+      
+      console.log('Полный ответ сервера:', response);
+      console.log('Результат сравнения (детально):', {
+        matches_data: response.data.matches_data?.length || 0,
+        missing_in_store: response.data.missing_in_store?.length || 0,
+        missing_in_supplier: response.data.missing_in_supplier?.length || 0,
+        raw_response: response.data
+      });
 
-        // Определяем, работаем ли мы на Vercel
-        const isVercelEnv = window.location.hostname.includes('vercel.app') || 
-                          window.location.hostname.includes('now.sh');
-
-        // Для Vercel настраиваем запрос с таймаутом
-        if (isVercelEnv) {
-          console.log('Vercel среда: настраиваем запрос с коротким таймаутом');
+      // Проверяем наличие данных в ответе
+      if (response.data) {
+        setComparisonResult(response.data);
+        
+        // Если есть совпадающие товары, выбираем их все
+        if (response.data.matches_data && response.data.matches_data.length > 0) {
+          setSelectedItems(response.data.matches_data);
           
-          // Используем увеличенный таймаут для Vercel
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 8000);
-          
-          try {
-            const response = await fetch(`${window.location.origin}/api/v1/comparison/compare`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                supplier_file: state.supplierFile,
-                store_file: state.storeFile
-              }),
-              signal: controller.signal
-            });
-            
-            clearTimeout(timeoutId);
-            
-            if (!response.ok) {
-              throw new Error(`Ошибка API: ${response.status} ${response.statusText}`);
-            }
-            
-            const result = await response.json();
-            console.log('Результат сравнения:', result);
-            
-            if (result && result.matches && result.matches.length > 0) {
-              setComparisonResult(result);
-              setSelectedItems(result.matches);
-              
-              // Логируем успешное сравнение
-              logger.logUserAction('comparison_success', 'comparison', {
-                matches_count: result.matches.length,
-                missing_in_store_count: result.missing_in_store.length,
-                missing_in_supplier_count: result.missing_in_supplier.length
-              });
-            } else {
-              console.warn('Нет совпадений для отображения!');
-              setError('Нет данных для сравнения');
-              
-              // Логируем отсутствие результатов
-              logger.logUserAction('comparison_no_results', 'comparison', {});
-            }
-          } catch (fetchError: any) {
-            console.error('Ошибка при сравнении файлов (Vercel):', fetchError);
-            if (fetchError.name === 'AbortError') {
-              setError('Превышено время ожидания ответа от сервера. Пожалуйста, попробуйте еще раз с файлами меньшего размера.');
-            } else {
-              setError('Ошибка при сравнении файлов: ' + (fetchError.message || 'Неизвестная ошибка'));
-            }
-            
-            // Логируем ошибку
-            logger.logUserAction('comparison_error', 'comparison', {
-              error_message: fetchError.message || 'Неизвестная ошибка',
-              error_type: fetchError.name
-            });
-          }
+          // Логируем успешное сравнение
+          logger.logUserAction('comparison_success', 'comparison', {
+            matches_count: response.data.matches_data.length,
+            missing_in_store_count: response.data.missing_in_store?.length || 0,
+            missing_in_supplier_count: response.data.missing_in_supplier?.length || 0
+          });
         } else {
-          // Для не-Vercel используем обычный API
-          const result = await comparisonService.compareFiles(state.supplierFile, state.storeFile);
-          console.log('Результат сравнения:', result);
-
-          if (result && result.matches && result.matches.length > 0) {
-            setComparisonResult(result);
-            setSelectedItems(result.matches);
-            
-            // Логируем успешное сравнение
-            logger.logUserAction('comparison_success', 'comparison', {
-              matches_count: result.matches.length,
-              missing_in_store_count: result.missing_in_store.length,
-              missing_in_supplier_count: result.missing_in_supplier.length
-            });
-          } else {
-            console.warn('Нет совпадений для отображения!');
-            setError('Нет данных для сравнения');
-            
-            // Логируем отсутствие результатов
-            logger.logUserAction('comparison_no_results', 'comparison', {});
+          console.warn('Нет совпадений для отображения, но есть другие результаты');
+          // Не устанавливаем ошибку, если есть другие данные для отображения
+          if (!response.data.missing_in_store?.length && !response.data.missing_in_supplier?.length) {
+            setError('Нет данных для сравнения. Проверьте маппинг колонок и данные в файлах.');
           }
+          
+          // Логируем отсутствие результатов
+          logger.logUserAction('comparison_no_results', 'comparison', {
+            has_missing_in_store: response.data.missing_in_store?.length > 0,
+            has_missing_in_supplier: response.data.missing_in_supplier?.length > 0
+          });
         }
-      } catch (err: any) {
-        console.error('Ошибка при сравнении файлов:', err);
-        if (err.response) {
-          console.error('Ответ от сервера:', err.response.data);
-        }
-        setError('Ошибка при сравнении файлов: ' + (err.message || 'Неизвестная ошибка'));
+      } else {
+        console.warn('Пустой ответ от сервера!');
+        setError('Сервер вернул пустой ответ. Пожалуйста, попробуйте еще раз.');
         
         // Логируем ошибку
         logger.logUserAction('comparison_error', 'comparison', {
-          error_message: err.message || 'Неизвестная ошибка',
-          status: err.response?.status
+          error_message: 'Пустой ответ от сервера'
         });
-      } finally {
-        setLoading(false);
-        window.scrollTo(0, 0);
       }
-    };
-    
+    } catch (err: any) {
+      console.error('Ошибка при сравнении файлов:', err);
+      if (err.response) {
+        console.error('Ответ от сервера:', err.response.data);
+      }
+      setError('Ошибка при сравнении файлов: ' + (err.message || 'Неизвестная ошибка'));
+      
+      // Логируем ошибку
+      logger.logUserAction('comparison_error', 'comparison', {
+        error_message: err.message || 'Неизвестная ошибка',
+        status: err.response?.status
+      });
+    } finally {
+      setLoading(false);
+      window.scrollTo(0, 0);
+    }
+  };
+  
+  // Загрузка результатов сравнения при монтировании
+  useEffect(() => {
     compareFiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -368,7 +361,7 @@ const ComparisonPage: React.FC = () => {
   
   // Обработчик выбора строк
   const onSelectionChanged = () => {
-    if (gridApiRef.current) {
+    if (gridApiRef.current && gridApiRef.current.api) {
       const selectedRows = gridApiRef.current.api.getSelectedRows();
       setSelectedItems(selectedRows);
       
@@ -376,50 +369,66 @@ const ComparisonPage: React.FC = () => {
       logger.logUserAction('rows_selected', 'data_grid', { 
         count: selectedRows.length 
       });
+    } else {
+      console.warn('Ошибка получения выбранных строк: gridApiRef.current или gridApiRef.current.api не определен');
     }
   };
   
   // Обработчик клика по строке
   const onRowClicked = (event: any) => {
+    if (!event || !event.data) {
+      console.warn('Ошибка в onRowClicked: event или event.data не определен', event);
+      return;
+    }
+    
     // Логируем клик по строке
     logger.logUserAction('row_click', 'data_grid', { 
-      article: event.data.article
+      article: event.data.article || 'неизвестный артикул'
     });
   };
   
   // Обработчик инициализации таблицы
   const onGridReady = (params: any) => {
-    gridApiRef.current = params.api;
-    console.log('Таблица AG Grid инициализирована:', params.api);
+    console.log('Таблица AG Grid инициализирована. Параметры:', params);
+    
+    if (!params || !params.api) {
+      console.error('Ошибка инициализации AG Grid: params или params.api не определены', params);
+      return;
+    }
+    
+    gridApiRef.current = params;
+    console.log('gridApiRef.current установлен:', gridApiRef.current);
     
     // Принудительно обновляем размеры таблицы
     setTimeout(() => {
-      if (gridApiRef.current) {
-        gridApiRef.current.sizeColumnsToFit();
-        gridApiRef.current.resetRowHeights();
+      if (gridApiRef.current && gridApiRef.current.api) {
+        console.log('Вызов методов AG Grid для обновления размеров');
+        gridApiRef.current.api.sizeColumnsToFit();
+        gridApiRef.current.api.resetRowHeights();
         
         // Выбираем все строки по умолчанию
-        gridApiRef.current.selectAll();
+        gridApiRef.current.api.selectAll();
+      } else {
+        console.error('Невозможно обновить размеры таблицы: gridApiRef.current или gridApiRef.current.api не определен');
       }
-    }, 100);
+    }, 300); // Увеличим таймаут для надежности
     
     // Явно устанавливаем данные в таблицу
-    if (comparisonResult && comparisonResult.matches && comparisonResult.matches.length > 0) {
-      console.log('Устанавливаем данные в таблицу:', comparisonResult.matches);
-      params.api.setRowData(comparisonResult.matches);
+    if (comparisonResult && comparisonResult.matches_data && comparisonResult.matches_data.length > 0) {
+      console.log('Устанавливаем данные в таблицу:', comparisonResult.matches_data);
+      params.api.setRowData(comparisonResult.matches_data);
     } else {
       console.warn('Нет данных для отображения в таблице!');
     }
   };
   
-  // Переход на страницу обновления цен
   const handleGoToUpdate = () => {
     if (selectedItems.length === 0) {
       alert('Пожалуйста, выберите товары для обновления цен');
       return;
     }
     
-    navigate('/update', {
+    navigate('/update-prices', {
       state: {
         selectedItems,
         storeFile: state.storeFile
@@ -433,12 +442,59 @@ const ComparisonPage: React.FC = () => {
         <Alert severity="error" sx={{ mt: 3 }}>
           {error}
         </Alert>
+        
+        {error.includes('подключиться к серверу') && (
+          <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+            <Typography variant="subtitle1" fontWeight="bold">Проблема с подключением к бэкенду:</Typography>
+            <Typography variant="body2">
+              Для работы приложения необходимо запустить бэкенд-сервер. Выполните следующие шаги:
+            </Typography>
+            <Box component="ol" sx={{ pl: 4, mt: 1 }}>
+              <li>
+                <Typography variant="body2">
+                  Откройте новый терминал
+                </Typography>
+              </li>
+              <li>
+                <Typography variant="body2">
+                  Перейдите в корневую директорию проекта
+                </Typography>
+              </li>
+              <li>
+                <Typography variant="body2">
+                  Выполните команду: <code>./start_backend.sh</code>
+                </Typography>
+              </li>
+              <li>
+                <Typography variant="body2">
+                  Дождитесь запуска сервера (в терминале должно появиться сообщение "Uvicorn running on http://0.0.0.0:8000")
+                </Typography>
+              </li>
+              <li>
+                <Typography variant="body2">
+                  Нажмите на кнопку "Повторить сравнение" ниже
+                </Typography>
+              </li>
+            </Box>
+          </Box>
+        )}
+        
         {!loading && !comparisonResult && (
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center', gap: 2 }}>
+            <LogButton 
+              logName="retry_comparison"
+              pageName="ComparisonPage"
+              variant="contained" 
+              color="primary"
+              onClick={() => window.location.reload()}
+            >
+              Повторить сравнение
+            </LogButton>
+            
             <LogButton 
               logName="return_to_upload"
               pageName="ComparisonPage"
-              variant="contained" 
+              variant="outlined" 
               onClick={() => navigate('/upload')}
             >
               Вернуться к загрузке файлов
@@ -471,6 +527,24 @@ const ComparisonPage: React.FC = () => {
         <Alert severity="warning" sx={{ mt: 3 }}>
           Нет данных для сравнения
         </Alert>
+        <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography variant="subtitle1" fontWeight="bold">Диагностическая информация:</Typography>
+          <Typography variant="body2">
+            1. Проверьте, запущен ли бэкенд-сервер на порту 8000. Выполните команду <code>./start_backend.sh</code> в корне проекта.
+          </Typography>
+          <Typography variant="body2">
+            2. Убедитесь, что маппинг колонок настроен правильно для обоих файлов.
+          </Typography>
+          <Typography variant="body2">
+            3. Проверьте, что файлы содержат данные с одинаковыми артикулами (используйте одинаковый формат артикула).
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Файл поставщика: {state?.supplierFile ? state.supplierFile.original_filename : 'не выбран'}
+          </Typography>
+          <Typography variant="body2">
+            Файл магазина: {state?.storeFile ? state.storeFile.original_filename : 'не выбран'}
+          </Typography>
+        </Box>
         {!loading && (
           <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
             <LogButton 
@@ -486,6 +560,84 @@ const ComparisonPage: React.FC = () => {
       </Container>
     );
   }
+
+  // Проверяем, есть ли хоть какие-то данные для отображения
+  const hasAnyData = (
+    (comparisonResult.matches_data && comparisonResult.matches_data.length > 0) ||
+    (comparisonResult.missing_in_store && comparisonResult.missing_in_store.length > 0) ||
+    (comparisonResult.missing_in_supplier && comparisonResult.missing_in_supplier.length > 0)
+  );
+
+  if (!hasAnyData) {
+    return (
+      <Container maxWidth="lg">
+        <Alert severity="warning" sx={{ mt: 3 }}>
+          Не найдено совпадений или отличий между файлами. Проверьте, что файлы содержат данные с одинаковыми артикулами и корректно настроен маппинг колонок.
+        </Alert>
+        
+        <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1 }}>
+          <Typography variant="subtitle1" fontWeight="bold">Возможные причины отсутствия данных:</Typography>
+          
+          <Typography variant="body2" sx={{mt: 1}}>
+            <strong>1. Разные форматы артикулов в файлах</strong> - артикулы должны точно совпадать, включая:
+          </Typography>
+          <Box component="ul" sx={{ pl: 4, mt: 0.5 }}>
+            <li>
+              <Typography variant="body2">
+                Регистр букв (например, "ABC123" и "abc123" считаются разными)
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Пробелы и дефисы (например, "123-456" и "123456" считаются разными)
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Ведущие нули (например, "00123" и "123" считаются разными)
+              </Typography>
+            </li>
+          </Box>
+          
+          <Typography variant="body2" sx={{mt: 1}}>
+            <strong>2. Неправильный маппинг колонок</strong> - убедитесь, что правильно указали, какие колонки содержат:
+          </Typography>
+          <Box component="ul" sx={{ pl: 4, mt: 0.5 }}>
+            <li>
+              <Typography variant="body2">
+                Артикул (article)
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Название товара (name)
+              </Typography>
+            </li>
+            <li>
+              <Typography variant="body2">
+                Цену (price)
+              </Typography>
+            </li>
+          </Box>
+          
+          <Typography variant="body2" sx={{mt: 1}}>
+            <strong>3. Бэкенд-сервер не запущен</strong> - запустите сервер с помощью команды <code>./start_backend.sh</code>
+          </Typography>
+        </Box>
+        
+        <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
+          <LogButton 
+            logName="return_to_upload"
+            pageName="ComparisonPage"
+            variant="contained" 
+            onClick={() => navigate('/upload')}
+          >
+            Вернуться к загрузке файлов
+          </LogButton>
+        </Box>
+      </Container>
+    );
+  }
   
   return (
     <Container maxWidth="lg">
@@ -494,7 +646,7 @@ const ComparisonPage: React.FC = () => {
           Результаты сравнения
         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
-          Сравнение цен поставщика и магазина для {comparisonResult.matches.length} товаров
+          Сравнение цен поставщика и магазина для {comparisonResult.matches_data?.length || 0} товаров
         </Typography>
       </Box>
       
@@ -515,7 +667,7 @@ const ComparisonPage: React.FC = () => {
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
               <Box sx={{ minWidth: 200, flex: 1 }}>
                 <Typography variant="body2" color="text.secondary">Совпадающие товары</Typography>
-                <Typography variant="h5">{comparisonResult.matches.length}</Typography>
+                <Typography variant="h5">{comparisonResult.matches_data?.length || 0}</Typography>
               </Box>
               <Box sx={{ minWidth: 200, flex: 1 }}>
                 <Typography variant="body2" color="text.secondary">Цены выше в магазине</Typography>
@@ -536,11 +688,11 @@ const ComparisonPage: React.FC = () => {
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
               <Box sx={{ minWidth: 200, flex: 1 }}>
                 <Typography variant="body2" color="text.secondary">Отсутствуют в магазине</Typography>
-                <Typography variant="h5">{comparisonResult.missing_in_store.length}</Typography>
+                <Typography variant="h5">{comparisonResult.missing_in_store?.length || 0}</Typography>
               </Box>
               <Box sx={{ minWidth: 200, flex: 1 }}>
                 <Typography variant="body2" color="text.secondary">Отсутствуют у поставщика</Typography>
-                <Typography variant="h5">{comparisonResult.missing_in_supplier.length}</Typography>
+                <Typography variant="h5">{comparisonResult.missing_in_supplier?.length || 0}</Typography>
               </Box>
             </Box>
           </CardContent>
@@ -552,17 +704,17 @@ const ComparisonPage: React.FC = () => {
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="comparison tabs">
             <Tab 
               label="Совпадающие товары" 
-              icon={<Chip label={comparisonResult.matches.length} size="small" color="primary" />} 
+              icon={<Chip label={comparisonResult.matches_data?.length || 0} size="small" color="primary" />} 
               iconPosition="end"
             />
             <Tab 
               label="Отсутствуют в магазине" 
-              icon={<Chip label={comparisonResult.missing_in_store.length} size="small" color="warning" />} 
+              icon={<Chip label={comparisonResult.missing_in_store?.length || 0} size="small" color="warning" />} 
               iconPosition="end"
             />
             <Tab 
               label="Отсутствуют у поставщика" 
-              icon={<Chip label={comparisonResult.missing_in_supplier.length} size="small" color="error" />} 
+              icon={<Chip label={comparisonResult.missing_in_supplier?.length || 0} size="small" color="error" />} 
               iconPosition="end"
             />
           </Tabs>
@@ -577,21 +729,14 @@ const ComparisonPage: React.FC = () => {
               variant="contained"
               color="primary"
               disabled={selectedItems.length === 0}
-              onClick={() => {
-                navigate('/update-prices', {
-                  state: {
-                    selectedItems,
-                    storeFile: state.storeFile
-                  }
-                });
-              }}
+              onClick={handleGoToUpdate}
             >
               Обновить цены выбранных товаров ({selectedItems.length})
             </LogButton>
           </Box>
           
           {/* Отображаем таблицу только если есть данные */}
-          {comparisonResult && comparisonResult.matches && comparisonResult.matches.length > 0 ? (
+          {comparisonResult && comparisonResult.matches_data && comparisonResult.matches_data.length > 0 ? (
             <Paper 
               elevation={1} 
               sx={{ 
@@ -608,7 +753,7 @@ const ComparisonPage: React.FC = () => {
                 }}
               >
                 <AgGridReact
-                  rowData={comparisonResult.matches}
+                  rowData={comparisonResult?.matches_data || []}
                   columnDefs={matchesColumns}
                   defaultColDef={{
                     resizable: true,
@@ -620,6 +765,7 @@ const ComparisonPage: React.FC = () => {
                   rowSelection="multiple"
                   onSelectionChanged={onSelectionChanged}
                   onGridReady={onGridReady}
+                  onRowClicked={onRowClicked}
                   rowHeight={48}
                   enableCellTextSelection={true}
                 />
@@ -654,7 +800,7 @@ const ComparisonPage: React.FC = () => {
                 }}
               >
                 <AgGridReact
-                  rowData={comparisonResult.missing_in_store}
+                  rowData={comparisonResult?.missing_in_store || []}
                   columnDefs={missingInStoreColumns}
                   defaultColDef={{
                     resizable: true,
@@ -664,6 +810,7 @@ const ComparisonPage: React.FC = () => {
                   pagination={true}
                   paginationPageSize={10}
                   rowHeight={48}
+                  onRowClicked={onRowClicked}
                   enableCellTextSelection={true}
                 />
               </div>
@@ -697,7 +844,7 @@ const ComparisonPage: React.FC = () => {
                 }}
               >
                 <AgGridReact
-                  rowData={comparisonResult.missing_in_supplier}
+                  rowData={comparisonResult?.missing_in_supplier || []}
                   columnDefs={missingInSupplierColumns}
                   defaultColDef={{
                     resizable: true,
@@ -707,6 +854,7 @@ const ComparisonPage: React.FC = () => {
                   pagination={true}
                   paginationPageSize={10}
                   rowHeight={48}
+                  onRowClicked={onRowClicked}
                   enableCellTextSelection={true}
                 />
               </div>
@@ -729,14 +877,7 @@ const ComparisonPage: React.FC = () => {
             variant="contained"
             color="primary"
             disabled={selectedItems.length === 0}
-            onClick={() => {
-              navigate('/update-prices', {
-                state: {
-                  selectedItems,
-                  storeFile: state.storeFile
-                }
-              });
-            }}
+            onClick={handleGoToUpdate}
           >
             Обновить цены выбранных товаров ({selectedItems.length})
           </LogButton>

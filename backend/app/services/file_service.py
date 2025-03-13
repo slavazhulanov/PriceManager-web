@@ -13,8 +13,10 @@ import logging
 import traceback
 import httpx
 import csv
+from app.core.logger import get_logger
+import requests
 
-logger = logging.getLogger("app.services.file")
+logger = get_logger("app.services.file_service")
 
 # Инициализация клиента Supabase
 supabase_client: Optional[Client] = None
@@ -41,32 +43,99 @@ def init_supabase_client() -> Optional[Client]:
         bucket_name = settings.SUPABASE_BUCKET
         folder_name = settings.SUPABASE_FOLDER
         
+        # Проверяем наличие service_role ключа
+        service_key = settings.SUPABASE_SERVICE_KEY
+        
         logger.info(f"Инициализация Supabase клиента: URL={url}, Bucket={bucket_name}")
         logger.info(f"Используемый ключ API: {key[:10]}...{key[-5:]} (скрыт для безопасности)")
         
+        if service_key:
+            logger.info(f"Service role ключ доступен: {service_key[:10]}...{service_key[-5:]} (скрыт для безопасности)")
+        
+        # Создаем клиент с обычным ключом для основных операций
         client = create_client(url, key)
         
-        # Проверяем наличие бакета (но не пытаемся создать, так как это требует админских прав)
+        # Проверяем наличие бакета через list_buckets
         try:
-            # Проверка существования бакета
-            logger.info(f"Проверяем наличие бакета {bucket_name}")
-            storage = client.storage.get_bucket(bucket_name)
-            logger.info(f"Бакет {bucket_name} найден")
+            # Если есть service_role ключ, используем его для проверки бакетов
+            if service_key:
+                logger.info("Используем service_role ключ для проверки бакетов")
+                # Формируем URL для запроса к Supabase Storage API
+                storage_url = f"{url}/storage/v1/bucket"
+                
+                # Заголовки для запроса с service_role ключом
+                headers = {
+                    "Content-Type": "application/json",
+                    "apikey": service_key,
+                    "Authorization": f"Bearer {service_key}"
+                }
+                
+                # Получаем список бакетов
+                response = requests.get(storage_url, headers=headers)
+                if response.status_code == 200:
+                    buckets = response.json()
+                    logger.info(f"Найдены бакеты: {[b['name'] for b in buckets]}")
+                    bucket_exists = any(b['name'] == bucket_name for b in buckets)
+                    
+                    # Если бакет не существует, создаем его
+                    if not bucket_exists:
+                        logger.warning(f"Бакет {bucket_name} не найден, пытаемся создать")
+                        
+                        # Данные для создания бакета
+                        data = {
+                            "id": bucket_name,
+                            "name": bucket_name,
+                            "public": False,
+                            "file_size_limit": 52428800  # 50MB в байтах
+                        }
+                        
+                        # Отправляем запрос на создание бакета
+                        create_response = requests.post(storage_url, headers=headers, json=data)
+                        
+                        if create_response.status_code == 200 or create_response.status_code == 201:
+                            logger.info(f"Бакет {bucket_name} успешно создан")
+                            bucket_exists = True
+                        else:
+                            logger.error(f"Ошибка при создании бакета: {create_response.text}")
+                else:
+                    logger.error(f"Ошибка при получении списка бакетов: {response.text}")
+            else:
+                buckets = client.storage.list_buckets()
+                bucket_exists = any(b['name'] == bucket_name for b in buckets)
             
-            # Проверяем наличие папки, создавая пустой файл-маркер если её нет
-            try:
-                logger.info(f"Проверяем доступность папки {folder_name}")
-                # Пробуем загрузить файл-маркер
-                marker_path = f"{folder_name}/.folder_marker"
-                client.storage.from_(bucket_name).upload(
-                    marker_path, 
-                    b"This is a folder marker. Do not delete.",
-                    {"content-type": "text/plain", "upsert": True}
-                )
-                logger.info(f"Папка {folder_name} проверена и доступна")
-            except Exception as folder_error:
-                logger.warning(f"Не удалось проверить папку {folder_name}: {str(folder_error)}")
-                logger.warning("Это может вызвать проблемы при сохранении файлов")
+            if bucket_exists:
+                logger.info(f"Бакет {bucket_name} найден")
+                supabase_client = client
+                
+                # Проверяем доступность папки uploads
+                try:
+                    logger.info("Проверяем доступность папки uploads")
+                    # Создаем папку uploads локально, если она не существует
+                    if not os.path.exists('uploads'):
+                        os.makedirs('uploads', exist_ok=True)
+                        logger.info("Папка uploads создана локально")
+                    
+                    # Проверка работоспособности Supabase Storage
+                    test_path = bucket_name + "/" + folder_name
+                    try:
+                        # Просто пытаемся получить список файлов
+                        client.storage.from_(bucket_name).list(folder_name)
+                        logger.info(f"Доступ к папке {test_path} подтвержден")
+                    except Exception as e:
+                        # Если не получилось, логируем ошибку
+                        error_str = str(e)
+                        logger.warning(f"Не удалось проверить доступ к папке {test_path}: {error_str}")
+                        # Но продолжаем работу
+                except Exception as e:
+                    error_str = str(e)
+                    logger.warning(f"Не удалось проверить папку uploads: {error_str}")
+                    logger.warning("Это может вызвать проблемы при сохранении файлов")
+                
+                logger.info(f"Supabase клиент успешно инициализирован, используется бакет {bucket_name}")
+                return client
+            else:
+                logger.error(f"Бакет {bucket_name} не найден и не удалось его создать")
+                return None
         except Exception as bucket_error:
             logger.warning(f"Не удалось проверить бакет {bucket_name}: {str(bucket_error)}")
             logger.warning("Это может вызвать проблемы при сохранении файлов")
@@ -593,4 +662,14 @@ def dataframe_to_bytes(df: pd.DataFrame, extension: str, encoding: str, separato
     except Exception as e:
         logger.error(f"Ошибка при преобразовании DataFrame в байты: {str(e)}")
         logger.debug(traceback.format_exc())
-        raise ValueError(f"Не удалось преобразовать DataFrame в байты: {str(e)}") 
+        raise ValueError(f"Не удалось преобразовать DataFrame в байты: {str(e)}")
+
+def check_bucket_exists(bucket_name: str) -> bool:
+    """Проверяет существование бакета в Supabase."""
+    try:
+        buckets = supabase_client.storage.list_buckets()
+        logger.info(f"Найдены бакеты: {[b['name'] for b in buckets]}")
+        return any(bucket['name'] == bucket_name for bucket in buckets)
+    except Exception as e:
+        logger.error(f"Ошибка при проверке бакета: {str(e)}")
+        return False 
