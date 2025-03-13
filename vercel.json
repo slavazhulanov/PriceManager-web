@@ -13,7 +13,7 @@
       "src": "frontend/package.json",
       "use": "@vercel/static-build",
       "config": {
-        "distDir": "build"
+        "distDir": "frontend/build"
       }
     }
   ],
@@ -27,8 +27,20 @@
       "dest": "backend/index.py"
     },
     {
-      "src": "/((?!api).*)",
-      "dest": "frontend/index.html",
+      "src": "/static/(.*)",
+      "dest": "frontend/build/static/$1"
+    },
+    {
+      "src": "/manifest.json",
+      "dest": "frontend/build/manifest.json"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "frontend/build/favicon.ico"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/build/index.html",
       "status": 200
     }
   ]
