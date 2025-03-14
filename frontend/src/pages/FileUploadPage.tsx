@@ -343,6 +343,40 @@ const FileUploadPage: React.FC = () => {
     });
   };
   
+  // Добавляем функцию для тестирования API
+  const runDiagnosticTest = async () => {
+    console.log("Запуск диагностического теста получения колонок");
+    
+    try {
+      // Тестируем получение колонок с помощью специального имени файла
+      const testColumns = await fileService.getColumns("diagnostic-test.csv");
+      console.log("Результат диагностического теста:", testColumns);
+      
+      // Показываем результат в интерфейсе
+      alert(`Получено ${testColumns.length} колонок: ${testColumns.join(", ")}`);
+    } catch (error) {
+      console.error("Ошибка в диагностическом тесте:", error);
+      alert(`Ошибка при выполнении теста: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  
+  // Тестирование общего API
+  const testGeneralApi = async () => {
+    console.log("Запуск теста общего API");
+    
+    try {
+      const response = await fileService.testApi();
+      console.log("Ответ теста API:", response);
+      
+      // Форматируем вывод для alert
+      const formattedData = JSON.stringify(response, null, 2);
+      alert(`Ответ API:\n${formattedData}`);
+    } catch (error) {
+      console.error("Ошибка при тестировании API:", error);
+      alert(`Ошибка при тестировании API: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  
   // Рендеринг контента в зависимости от активного шага
   const getStepContent = (step: number) => {
     switch (step) {
@@ -535,6 +569,43 @@ const FileUploadPage: React.FC = () => {
           </Button>
         )}
       </Box>
+      
+      {/* Блок с диагностикой */}
+      <div className="diagnostic-panel" style={{ marginTop: '20px', padding: '10px', border: '1px dashed #ccc' }}>
+        <h3>Диагностика</h3>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={runDiagnosticTest}
+            style={{ 
+              padding: '8px 16px', 
+              backgroundColor: '#f0ad4e', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer' 
+            }}
+          >
+            Проверить получение колонок
+          </button>
+          
+          <button 
+            onClick={testGeneralApi}
+            style={{ 
+              padding: '8px 16px', 
+              backgroundColor: '#5bc0de', 
+              color: 'white', 
+              border: 'none', 
+              borderRadius: '4px', 
+              cursor: 'pointer' 
+            }}
+          >
+            Проверить общий API
+          </button>
+        </div>
+        <p style={{ fontSize: '12px', color: '#777' }}>
+          Эти функции отправляют тестовые запросы на сервер и помогают диагностировать проблемы с API.
+        </p>
+      </div>
     </Container>
   );
 };

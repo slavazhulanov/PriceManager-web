@@ -301,6 +301,12 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
     """
     logger.info(f"Запрос колонок для файла: {filename}, кодировка: {encoding}, разделитель: {separator}")
     
+    # Для диагностики вернем тестовые колонки с информацией о запросе
+    if "diagnostic-test" in filename:
+        test_columns = ["Тестовый артикул", "Тестовое наименование", "Тестовая цена", f"Запрос в {datetime.now().isoformat()}"]
+        logger.info(f"Диагностический ответ: {test_columns}")
+        return test_columns
+    
     try:
         # Получаем содержимое файла
         logger.debug(f"Получаем содержимое файла {filename}")
@@ -311,6 +317,9 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
             # Для отладки возвращаем тестовые колонки вместо ошибки
             test_columns = ["Артикул", "Наименование", "Цена", "Остаток"]
             logger.info(f"Возвращаем тестовые колонки вместо ошибки: {test_columns}")
+            
+            # Выводим в лог фактическое содержимое ответа для диагностики
+            logger.debug(f"Тип ответа: {type(test_columns)}, JSON: {test_columns}")
             return test_columns
         
         logger.debug(f"Получено содержимое файла {filename}, размер: {len(file_content)} байт")
@@ -349,6 +358,7 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         
         # Выводим колонки перед возвратом
         logger.debug(f"Возвращаемые колонки после обработки: {columns}")
+        logger.debug(f"Тип ответа: {type(columns)}, JSON вид: {columns}")
         
         # Возвращаем колонки напрямую как список строк, не оборачивая в объект
         return columns

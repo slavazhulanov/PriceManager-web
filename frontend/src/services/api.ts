@@ -131,11 +131,24 @@ export const fileService = {
     if (separator) params.separator = separator;
     
     try {
+      console.log('Отправка запроса на получение колонок:', {
+        url: `files/columns/${filename}`,
+        params
+      });
+      
       const response = await api.get(`files/columns/${filename}`, { params });
       console.log('Получены колонки (сырой ответ):', response.data);
+      console.log('Полный ответ API:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        config: response.config
+      });
       
       // Проверка типа полученных данных для более детальной диагностики
       console.log('Тип полученных данных:', typeof response.data);
+      console.log('Является массивом:', Array.isArray(response.data));
+      console.log('JSON представление данных:', JSON.stringify(response.data));
       
       let columns: string[] = [];
       const data = response.data;
@@ -157,6 +170,8 @@ export const fileService = {
           .filter(([key, value]) => Array.isArray(value))
           .map(([key, value]) => ({ key, value }));
         
+        console.log('Поля объекта, содержащие массивы:', arrayFields);
+        
         if (arrayFields.length > 0) {
           // Берем первый найденный массив
           columns = arrayFields[0].value as string[];
@@ -167,41 +182,46 @@ export const fileService = {
           const serviceFields = ['status', 'message', 'timestamp', 'path', 'error', 'detail'];
           const usableKeys = Object.keys(data).filter(key => !serviceFields.includes(key));
           
+          console.log('Все ключи объекта:', Object.keys(data));
+          console.log('Используемые ключи после фильтрации:', usableKeys);
+          
           if (usableKeys.length > 0) {
             columns = usableKeys;
             console.log('Используем ключи объекта как колонки:', columns);
           } else {
             // Проверим, есть ли в объекте ключи status и message, что может указывать на ответ API без данных
             if (data.status === 'ok' && data.message) {
-              console.warn('Получен ответ API без колонок:', data.message);
-              return []; // Возвращаем пустой массив
+              console.warn(`Получен ответ API без колонок: ${data.message}`);
             }
-            
-            console.error('Нет подходящих данных для колонок в ответе:', data);
-            throw new Error('Невозможно извлечь колонки из ответа API');
           }
         }
-      }
-      // В случае строки или других типов данных
-      else {
-        console.error('Неподдерживаемый формат данных:', data);
-        throw new Error(`Неверный формат данных колонок: ${typeof data}`);
+      } else {
+        console.error('Получены данные неизвестного формата:', data);
       }
       
-      // Преобразуем все элементы в строки и фильтруем пустые
-      columns = columns
-        .map(col => String(col).trim())
-        .filter(col => col !== '' && col !== 'undefined' && col !== 'null');
+      if (columns.length === 0) {
+        console.error(`Получен пустой список колонок для файла ${filename.includes('supplier') ? 'поставщика' : 'магазина'}`);
+      } else {
+        console.log(`Успешно получены колонки для файла ${filename.includes('supplier') ? 'поставщика' : 'магазина'}:`, columns);
+      }
       
-      console.log('Финальный список колонок:', columns);
       return columns;
     } catch (error: any) {
-      console.error('Ошибка при получении колонок:', {
-        status: error?.response?.status,
-        data: error?.response?.data,
-        message: error.message
+      console.error('Ошибка при получении колонок:', error);
+      console.error('Детали ошибки:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'Нет ответа',
+        config: error.config ? {
+          url: error.config.url,
+          method: error.config.method,
+          params: error.config.params
+        } : 'Нет конфигурации'
       });
-      throw error;
+      
+      return [];
     }
   },
   
@@ -244,6 +264,38 @@ export const fileService = {
     
     // Объединение всех строк
     return `${headerLine}\n${rowLines.join('\n')}`;
+  },
+
+  /**
+   * Тестовый метод для проверки API
+   */
+  async testApi(): Promise<any> {
+    console.log('Выполнение тестового запроса к API');
+    
+    try {
+      const response = await api.get('test');
+      console.log('Получен ответ от тестового API:', response.data);
+      console.log('Статус ответа:', response.status);
+      console.log('Заголовки ответа:', response.headers);
+      
+      return response.data;
+    } catch (error: any) {
+      console.error('Ошибка при тестировании API:', error);
+      console.error('Детали ошибки:', {
+        message: error.message,
+        response: error.response ? {
+          status: error.response.status,
+          data: error.response.data
+        } : 'Нет ответа',
+        config: error.config ? {
+          url: error.config.url,
+          method: error.config.method,
+          params: error.config.params
+        } : 'Нет конфигурации'
+      });
+      
+      throw error;
+    }
   }
 };
 
