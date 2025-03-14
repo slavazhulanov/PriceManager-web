@@ -311,7 +311,7 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
             # Для отладки возвращаем тестовые колонки вместо ошибки
             test_columns = ["Артикул", "Наименование", "Цена", "Остаток"]
             logger.info(f"Возвращаем тестовые колонки вместо ошибки: {test_columns}")
-            return {"columns": test_columns}
+            return test_columns
         
         logger.debug(f"Получено содержимое файла {filename}, размер: {len(file_content)} байт")
         
@@ -350,14 +350,8 @@ async def get_file_columns(filename: str, encoding: str = "utf-8", separator: st
         # Выводим колонки перед возвратом
         logger.debug(f"Возвращаемые колонки после обработки: {columns}")
         
-        # Возвращаем колонки в формате JSON с ключом columns и дополнительной информацией
-        return {
-            "status": "ok",
-            "message": "Колонки получены успешно",
-            "timestamp": datetime.now().isoformat(),
-            "path": f"/api/v1/files/columns/{filename}",
-            "columns": columns
-        }
+        # Возвращаем колонки напрямую как список строк, не оборачивая в объект
+        return columns
     except ValueError as e:
         logger.error(f"Ошибка при получении колонок файла {filename}: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
