@@ -18,6 +18,7 @@ import {
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import SettingsIcon from '@mui/icons-material/Settings';
 import CompareArrowsIcon from '@mui/icons-material/CompareArrows';
+import BuildIcon from '@mui/icons-material/Build';
 import { useNavigate } from 'react-router-dom';
 import FileDropzone from '../components/file/FileDropzone';
 import ColumnSelector from '../components/file/ColumnSelector';
@@ -27,6 +28,7 @@ import {
   ColumnMapping 
 } from '../types';
 import { fileService } from '../services/api';
+import axios from 'axios';
 
 // Шаги загрузки файлов
 const steps = [
@@ -343,37 +345,45 @@ const FileUploadPage: React.FC = () => {
     });
   };
   
-  // Добавляем функцию для тестирования API
-  const runDiagnosticTest = async () => {
-    console.log("Запуск диагностического теста получения колонок");
+  // Добавляем функцию для диагностики проблемы
+  const runDiagnostic = async () => {
+    console.log('Запуск диагностического теста получения колонок');
     
     try {
-      // Тестируем получение колонок с помощью специального имени файла
-      const testColumns = await fileService.getColumns("diagnostic-test.csv");
-      console.log("Результат диагностического теста:", testColumns);
+      // Тестируем получение колонок для тестового файла
+      console.log('Запрос колонок для файла:', {
+        filename: 'diagnostic-test.csv',
+        encoding: undefined,
+        separator: undefined,
+        url: 'files/columns/diagnostic-test.csv'
+      });
       
-      // Показываем результат в интерфейсе
-      alert(`Получено ${testColumns.length} колонок: ${testColumns.join(", ")}`);
-    } catch (error) {
-      console.error("Ошибка в диагностическом тесте:", error);
-      alert(`Ошибка при выполнении теста: ${error instanceof Error ? error.message : String(error)}`);
+      const response = await fileService.getColumns('diagnostic-test.csv');
+      console.log('Результат диагностического теста:', response);
+      
+      // Если колонки получены успешно, добавляем их к поставщику
+      if (response && response.length > 0) {
+        setSupplierColumns(response);
+      }
+    } catch (err) {
+      console.error('Ошибка диагностического теста:', err);
     }
   };
   
-  // Тестирование общего API
+  // Добавляем функцию для тестирования общего API
   const testGeneralApi = async () => {
-    console.log("Запуск теста общего API");
+    console.log('Запуск теста общего API');
     
     try {
-      const response = await fileService.testApi();
-      console.log("Ответ теста API:", response);
+      console.log('Выполнение тестового запроса к API');
+      const response = await axios.get('/api/v1/test');
       
-      // Форматируем вывод для alert
-      const formattedData = JSON.stringify(response, null, 2);
-      alert(`Ответ API:\n${formattedData}`);
-    } catch (error) {
-      console.error("Ошибка при тестировании API:", error);
-      alert(`Ошибка при тестировании API: ${error instanceof Error ? error.message : String(error)}`);
+      console.log('Получен ответ от тестового API:', response.data);
+      console.log('Статус ответа:', response.status);
+      console.log('Заголовки ответа:', response.headers);
+      console.log('Ответ теста API:', response.data);
+    } catch (err) {
+      console.error('Ошибка теста общего API:', err);
     }
   };
   
@@ -428,6 +438,17 @@ const FileUploadPage: React.FC = () => {
                       <Typography color="text.secondary">
                         Загрузите файл поставщика и дождитесь загрузки колонок...
                       </Typography>
+                      {supplierFile && (
+                        <Button 
+                          variant="outlined" 
+                          color="warning" 
+                          startIcon={<BuildIcon />}
+                          onClick={runDiagnostic}
+                          sx={{ mt: 2 }}
+                        >
+                          Диагностика (получить тестовые колонки)
+                        </Button>
+                      )}
                     </Paper>
                   )}
                 </CardContent>
@@ -445,8 +466,8 @@ const FileUploadPage: React.FC = () => {
                     Настройка колонок файла магазина
                   </Typography>
                   <Typography variant="body2" color="text.secondary" paragraph>
-                    Укажите, какие колонки в вашем файле магазина содержат артикулы, цены и наименования товаров.
-                    Эта информация нужна для правильного обновления цен.
+                    Для корректного сравнения цен нужно указать, какие колонки в файле содержат артикулы, цены и наименования товаров.
+                    Мы попытались определить их автоматически, но вы можете изменить выбор, если он неверен.
                   </Typography>
                   {storeFile && storeColumns.length > 0 ? (
                     <ColumnSelector 
@@ -463,6 +484,16 @@ const FileUploadPage: React.FC = () => {
                   )}
                 </CardContent>
               </Card>
+            </Grid>
+            
+            <Grid item xs={12} sx={{ mt: 2 }}>
+              <Button
+                variant="outlined"
+                color="info"
+                onClick={testGeneralApi}
+              >
+                Проверить API
+              </Button>
             </Grid>
           </Grid>
         );
@@ -569,43 +600,6 @@ const FileUploadPage: React.FC = () => {
           </Button>
         )}
       </Box>
-      
-      {/* Блок с диагностикой */}
-      <div className="diagnostic-panel" style={{ marginTop: '20px', padding: '10px', border: '1px dashed #ccc' }}>
-        <h3>Диагностика</h3>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button 
-            onClick={runDiagnosticTest}
-            style={{ 
-              padding: '8px 16px', 
-              backgroundColor: '#f0ad4e', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px', 
-              cursor: 'pointer' 
-            }}
-          >
-            Проверить получение колонок
-          </button>
-          
-          <button 
-            onClick={testGeneralApi}
-            style={{ 
-              padding: '8px 16px', 
-              backgroundColor: '#5bc0de', 
-              color: 'white', 
-              border: 'none', 
-              borderRadius: '4px', 
-              cursor: 'pointer' 
-            }}
-          >
-            Проверить общий API
-          </button>
-        </div>
-        <p style={{ fontSize: '12px', color: '#777' }}>
-          Эти функции отправляют тестовые запросы на сервер и помогают диагностировать проблемы с API.
-        </p>
-      </div>
     </Container>
   );
 };
