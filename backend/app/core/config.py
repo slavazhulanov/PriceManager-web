@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     SUPABASE_FOLDER: str = os.getenv("SUPABASE_FOLDER", "files")
     
     # Настройки логирования
-    LOG_LEVEL: str = "INFO"  # Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    LOG_LEVEL: str = "DEBUG"  # Уровень логирования (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     LOG_DIR: str = "logs"
     

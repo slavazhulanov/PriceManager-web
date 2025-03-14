@@ -1,0 +1,40 @@
+{
+    "rules": [
+      {
+        "name": "no-test-mock-code",
+        "description": "Prevent generation of test, mock, or stub code",
+        "patterns": [
+          "**/*.{test,spec}.{js,ts,py,java}",
+          "**/__tests__/**",
+          "**/mocks/**",
+          "**/stubs/**"
+        ],
+        "blocked_keywords": ["describe(", "it(", "test(", "mock(", "jest.", "chai.", "sinon."]
+      },
+      {
+        "name": "production-code-only",
+        "description": "Ensure code is intended for production use",
+        "allowed_directories": ["src/", "lib/", "app/", "services/"],
+        "disallowed_patterns": ["console.log(", "debugger;", "// TODO: remove"]
+      },
+      {
+        "name": "safe-code-practices",
+        "description": "Enforce defensive programming and reliability",
+        "required_patterns": ["try {", "catch (", "finally {", "if (", "=== null"],
+        "disallowed_patterns": ["eval(", "setTimeout(", "!!!", "FIXME"]
+      },
+      {
+        "name": "clean-repository",
+        "description": "Prevent unnecessary file creation",
+        "max_files_per_commit": 5,
+        "allowed_extensions": [".js", ".ts", ".py", ".java", ".md"],
+        "disallowed_extensions": [".log", ".tmp", ".bak"]
+      }
+    ],
+    "agent_instructions": [
+      "Always verify code works with existing project dependencies",
+      "Avoid experimental language features without explicit approval",
+      "Use project-specific coding conventions (e.g., Prettier/ESLint configs)",
+      "Require human review for any code modifying core functionality"
+    ]
+  }
