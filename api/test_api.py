@@ -1,21 +1,44 @@
-from http.server import BaseHTTPRequestHandler
-import json
-import os
-import uuid
-import time
-import re
-from datetime import datetime
+#!/usr/bin/env python
+"""
+Скрипт для тестирования заглушек API перед деплоем на Vercel.
+Запускает локальный HTTP-сервер и выполняет базовые тесты API.
+"""
 
-class handler(BaseHTTPRequestHandler):
+import http.server
+import socketserver
+import threading
+import time
+import json
+import requests
+import sys
+import os
+from io import BytesIO
+
+# Добавляем текущую директорию в путь для импорта
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# Импортируем index (не только handler)
+import index
+
+PORT = 8000
+
+class TestHTTPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+# Создаем специальный обработчик, который эмулирует среду для index.handler
+class TestHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         
+        # Вместо инициализации handler напрямую, мы копируем логику из index.py
+        path = self.path
+        
         # Проверяем, является ли это запросом на получение колонок файла
-        columns_pattern = re.compile(r'/api/v1/files/columns/(.+)')
-        columns_match = columns_pattern.match(self.path)
+        columns_pattern = index.re.compile(r'/api/v1/files/columns/(.+)')
+        columns_match = columns_pattern.match(path)
         
         if columns_match:
             # Это запрос на получение колонок
@@ -36,20 +59,20 @@ class handler(BaseHTTPRequestHandler):
             
             # Возвращаем колонки в формате, который ожидает фронтенд
             self.wfile.write(json.dumps(columns, ensure_ascii=False).encode('utf-8'))
-        elif self.path.startswith('/api/v1/files/') and '/columns/' not in self.path:
+        elif path.startswith('/api/v1/files/') and '/columns/' not in path:
             # Другие запросы к файлам, но не для получения колонок
-            file_id = self.path.split('/')[-1]
+            file_id = path.split('/')[-1]
             
             response_data = {
                 "id": file_id,
                 "original_filename": f"file_{file_id}.csv",
                 "stored_filename": f"file_{file_id}.csv",
                 "file_url": f"/api/v1/files/download/{file_id}",
-                "file_type": "supplier" if "supplier" in self.path else "store",
+                "file_type": "supplier" if "supplier" in path else "store",
                 "file_size": 1000,
                 "encoding": "utf-8",
                 "separator": ",",
-                "upload_date": datetime.now().isoformat()
+                "upload_date": index.datetime.now().isoformat()
             }
             
             self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
@@ -58,21 +81,20 @@ class handler(BaseHTTPRequestHandler):
             response_data = {
                 "status": "ok",
                 "message": "API работает",
-                "timestamp": datetime.now().isoformat(),
-                "path": self.path
+                "timestamp": index.datetime.now().isoformat(),
+                "path": path
             }
             
             self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
-        return
-    
+        
     def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
         
         try:
             post_data_json = json.loads(post_data.decode('utf-8'))
@@ -86,13 +108,13 @@ class handler(BaseHTTPRequestHandler):
                 # Генерируем временный идентификатор для файла
                 timestamp = int(time.time())
                 file_ext = os.path.splitext(file_name)[1]
-                stored_filename = f"file_{timestamp}_{uuid.uuid4().hex[:8]}{file_ext}"
+                stored_filename = f"file_{timestamp}_{index.uuid.uuid4().hex[:8]}{file_ext}"
                 
                 # Создаем заглушку для загрузки
                 response_data = {
                     "uploadUrl": f"/api/v1/files/mock-upload/{stored_filename}",
                     "fileInfo": {
-                        "id": f"mock-{uuid.uuid4()}",
+                        "id": f"mock-{index.uuid.uuid4()}",
                         "original_filename": file_name,
                         "stored_filename": stored_filename,
                         "file_type": file_type,
@@ -105,7 +127,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 # Возвращаем информацию о файле в формате, ожидаемом клиентом
                 response_data = {
-                    "id": file_info.get('id', str(uuid.uuid4())),
+                    "id": file_info.get('id', str(index.uuid.uuid4())),
                     "original_filename": file_info.get('original_filename', 'unknown.csv'),
                     "stored_filename": file_info.get('stored_filename', ''),
                     "file_url": f"/api/v1/files/download/{file_info.get('stored_filename', '')}",
@@ -113,7 +135,7 @@ class handler(BaseHTTPRequestHandler):
                     "file_size": 1000,
                     "encoding": "utf-8",
                     "separator": ",",
-                    "upload_date": datetime.now().isoformat()
+                    "upload_date": index.datetime.now().isoformat()
                 }
             elif path == '/api/v1/comparison/compare':
                 # Обработка запроса на сравнение файлов
@@ -176,40 +198,20 @@ class handler(BaseHTTPRequestHandler):
                 response_data = {
                     "status": "ok",
                     "message": "Данные получены",
-                    "timestamp": datetime.now().isoformat(),
-                    "path": self.path,
+                    "timestamp": index.datetime.now().isoformat(),
+                    "path": path,
                     "received_data": post_data_json
                 }
             
             self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
-            return
         except Exception as e:
             error_response = {
                 "status": "error",
                 "message": str(e),
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": index.datetime.now().isoformat(),
                 "path": self.path
             }
             self.wfile.write(json.dumps(error_response, ensure_ascii=False).encode('utf-8'))
-            return
-    
-    def do_PUT(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        
-        # Простая обработка загрузки файла
-        content_length = int(self.headers.get('Content-Length', 0))
-        self.rfile.read(content_length)  # Читаем данные, но не используем их
-        
-        response_data = {
-            "status": "ok",
-            "message": "Файл успешно загружен"
-        }
-        
-        self.wfile.write(json.dumps(response_data, ensure_ascii=False).encode('utf-8'))
-        return
         
     def do_OPTIONS(self):
         self.send_response(200)
@@ -217,4 +219,81 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        return 
+
+def start_server():
+    httpd = TestHTTPServer(("", PORT), TestHandler)
+    print(f"Запуск тестового сервера на порту {PORT}...")
+    httpd.serve_forever()
+
+def run_tests():
+    base_url = f"http://localhost:{PORT}"
+    
+    # Тест 1: Получение колонок для файла поставщика
+    print("\n--- Тест 1: Получение колонок для файла поставщика ---")
+    response = requests.get(f"{base_url}/api/v1/files/columns/supplier_file.csv")
+    print(f"Статус: {response.status_code}")
+    print(f"Ответ: {response.text}")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert "Артикул" in response.json()
+    print("✅ Тест пройден")
+    
+    # Тест 2: Получение колонок для файла магазина
+    print("\n--- Тест 2: Получение колонок для файла магазина ---")
+    response = requests.get(f"{base_url}/api/v1/files/columns/store_file.csv")
+    print(f"Статус: {response.status_code}")
+    print(f"Ответ: {response.text}")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+    assert "Артикул" in response.json()
+    print("✅ Тест пройден")
+    
+    # Тест 3: Запрос URL для загрузки файла
+    print("\n--- Тест 3: Запрос URL для загрузки файла ---")
+    response = requests.post(
+        f"{base_url}/api/v1/files/upload_url",
+        json={"fileName": "test.csv", "fileType": "supplier"}
+    )
+    print(f"Статус: {response.status_code}")
+    print(f"Ответ: {json.dumps(response.json(), ensure_ascii=False, indent=2)}")
+    assert response.status_code == 200
+    assert "uploadUrl" in response.json()
+    assert "fileInfo" in response.json()
+    print("✅ Тест пройден")
+    
+    # Тест 4: Сравнение файлов
+    print("\n--- Тест 4: Сравнение файлов ---")
+    response = requests.post(
+        f"{base_url}/api/v1/comparison/compare",
+        json={
+            "supplier_file": {"id": "test1", "file_type": "supplier"},
+            "store_file": {"id": "test2", "file_type": "store"}
+        }
+    )
+    print(f"Статус: {response.status_code}")
+    print(f"Количество совпадений: {len(response.json().get('matches', []))}")
+    assert response.status_code == 200
+    assert "matches" in response.json()
+    assert "matches_data" in response.json()
+    assert len(response.json()["matches"]) > 0
+    print("✅ Тест пройден")
+    
+    print("\n✅ Все тесты пройдены успешно!")
+
+if __name__ == "__main__":
+    # Запускаем сервер в отдельном потоке
+    server_thread = threading.Thread(target=start_server, daemon=True)
+    server_thread.start()
+    
+    # Ждем запуск сервера
+    time.sleep(1)
+    
+    try:
+        # Запускаем тесты
+        run_tests()
+    except Exception as e:
+        print(f"❌ Тест не пройден: {str(e)}")
+        sys.exit(1)
+    finally:
+        print("\nЗавершение тестового сервера...")
+        sys.exit(0) 
